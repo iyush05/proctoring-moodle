@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<libraries>
+    <library>
+        <location>thirdparty/face-api.min.js</location>
+        <name>@vladmandic/face-api</name>
+        <version>1.7.14</version>
+        <license>MIT</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>thirdparty/models</location>
+        <name>face-api.js pre-trained models</name>
+        <version>1.7.14</version>
+        <license>MIT</license>
+        <licenseversion></licenseversion>
+    </library>
+</libraries>

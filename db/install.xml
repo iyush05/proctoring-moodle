@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026072400"
+       COMMENT="XMLDB file for quizaccess_proctor plugin"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="../../../../../lib/xmldb/xmldb.xsd"
+>
+    <TABLES>
+        <!-- Quiz-level settings table -->
+        <TABLE NAME="quizaccess_proctor" COMMENT="Stores proctoring settings per quiz">
+            <FIELDS>
+                <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+                <FIELD NAME="quizid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
+                       COMMENT="Foreign key to quiz.id"/>
+                <FIELD NAME="proctor_enabled" TYPE="int" LENGTH="2" NOTNULL="true" DEFAULT="0"
+                       SEQUENCE="false" COMMENT="Whether proctoring is enabled for this quiz"/>
+            </FIELDS>
+            <KEYS>
+                <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+                <KEY NAME="quizid" TYPE="foreign-unique" FIELDS="quizid" REFTABLE="quiz" REFFIELDS="id"/>
+            </KEYS>
+        </TABLE>
+
+        <!-- Per-snapshot proctoring detection logs -->
+        <TABLE NAME="quizaccess_proctor_logs" COMMENT="Stores face detection results per snapshot">
+            <FIELDS>
+                <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+                <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
+                       COMMENT="Course ID"/>
+                <FIELD NAME="quizid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
+                       COMMENT="Quiz ID"/>
+                <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
+                       COMMENT="User ID of the student"/>
+                <FIELD NAME="attemptid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"
+                       COMMENT="Quiz attempt ID"/>
+                <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="active" SEQUENCE="false"
+                       COMMENT="Detection status: match, mismatch, no_face, multiple_faces, error, active"/>
+                <FIELD NAME="confidence" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="Face match distance score (lower = better match)"/>
+                <FIELD NAME="image_data" TYPE="text" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="Base64 encoded snapshot image for review"/>
+                <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
+                       COMMENT="Timestamp of this log entry"/>
+            </FIELDS>
+            <KEYS>
+                <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+            </KEYS>
+            <INDEXES>
+                <INDEX NAME="idx_attempt" UNIQUE="false" FIELDS="attemptid"/>
+                <INDEX NAME="idx_quiz_user" UNIQUE="false" FIELDS="quizid, userid"/>
+            </INDEXES>
+        </TABLE>
+    </TABLES>
+</XMLDB>
