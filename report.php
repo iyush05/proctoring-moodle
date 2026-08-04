@@ -62,10 +62,12 @@ if ($userid) {
     $params['userid'] = $userid;
 }
 
-// Fetch logs, excluding 'active' status (those are just session init records).
-$sql = "SELECT l.*, u.firstname, u.lastname, u.email, u.picture, u.imagealt
+// Fetch logs with attempt information, excluding 'active' status (those are just session init records).
+$sql = "SELECT l.*, u.firstname, u.lastname, u.email, u.picture, u.imagealt,
+               qa.timestart AS attempt_timestart, qa.attempt AS attempt_number
         FROM {quizaccess_proctor_logs} l
         JOIN {user} u ON u.id = l.userid
+        LEFT JOIN {quiz_attempts} qa ON qa.id = l.attemptid
         WHERE l.quizid = :quizid AND l.status != 'active' {$userwhere}
         ORDER BY l.timecreated DESC";
 $logs = $DB->get_records_sql($sql, $params, 0, 500);
@@ -154,7 +156,27 @@ if (empty($logs)) {
 
     foreach ($logs as $log) {
         $fullname = fullname($log);
-        $timestr = userdate($log->timecreated, get_string('strftimedatetimeshort', 'langconfig'));
+        $servertimestr = userdate($log->timecreated, '%d %b %Y, %H:%M:%S');
+
+        // Calculate attempt elapsed time offset.
+        $elapsedhtml = '';
+        if (!empty($log->attempt_timestart) && $log->timecreated >= $log->attempt_timestart) {
+            $elapsed = $log->timecreated - $log->attempt_timestart;
+            $mins = floor($elapsed / 60);
+            $secs = $elapsed % 60;
+            $elapsedstr = sprintf('+%02d:%02d into attempt', $mins, $secs);
+            $elapsedhtml = '<div class="proctor-time-elapsed"><span class="badge proctor-badge-elapsed" style="background:#e2e8f0; color:#1e293b; border:1px solid #94a3b8; font-weight:600; padding:3px 8px; border-radius:6px; display:inline-block;" title="Elapsed time since attempt start">' . s($elapsedstr) . '</span></div>';
+        }
+
+        $timehtml = '<div class="proctor-time-cell" data-timestamp="' . $log->timecreated . '">';
+        $timehtml .= '<div class="proctor-time-primary" title="Server time: ' . s($servertimestr) . '">' . s($servertimestr) . '</div>';
+        $timehtml .= $elapsedhtml;
+        $timehtml .= '</div>';
+
+        // Attempt number and link to review.
+        $attemptlabel = !empty($log->attempt_number) ? get_string('attempt', 'quiz', $log->attempt_number) : '#' . $log->attemptid;
+        $attempturl = new moodle_url('/mod/quiz/review.php', ['attempt' => $log->attemptid]);
+        $attempthtml = '<a href="' . $attempturl . '" target="_blank" title="' . s(get_string('review', 'quiz')) . '"><strong>' . s($attemptlabel) . '</strong></a>';
 
         // Status badge.
         $statusmap = [
@@ -185,8 +207,8 @@ if (empty($logs)) {
 
         echo '<tr>';
         echo '<td>' . s($fullname) . '</td>';
-        echo '<td>#' . $log->attemptid . '</td>';
-        echo '<td>' . $timestr . '</td>';
+        echo '<td>' . $attempthtml . '</td>';
+        echo '<td>' . $timehtml . '</td>';
         echo '<td>' . $badgehtml . '</td>';
         echo '<td>' . $confidencestr . '</td>';
 
@@ -262,6 +284,45 @@ document.addEventListener("keydown", function(e) {
         closeProctorModal();
     }
 });
+
+// Automatically format all timestamps in the teacher/viewer\'s local browser timezone with seconds
+document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll(".proctor-time-cell").forEach(function(el) {
+        var ts = parseInt(el.getAttribute("data-timestamp"), 10);
+        if (ts) {
+            var d = new Date(ts * 1000);
+            var primary = el.querySelector(".proctor-time-primary");
+            if (primary && !isNaN(d.getTime())) {
+                var datePart = d.toLocaleDateString(undefined, {
+                    day: "numeric", month: "short", year: "numeric"
+                });
+                var timePart = d.toLocaleTimeString(undefined, {
+                    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+                });
+                primary.textContent = datePart + ", " + timePart;
+            }
+        }
+    });
+});
+// Also run immediately in case DOM is already loaded
+(function() {
+    document.querySelectorAll(".proctor-time-cell").forEach(function(el) {
+        var ts = parseInt(el.getAttribute("data-timestamp"), 10);
+        if (ts) {
+            var d = new Date(ts * 1000);
+            var primary = el.querySelector(".proctor-time-primary");
+            if (primary && !isNaN(d.getTime())) {
+                var datePart = d.toLocaleDateString(undefined, {
+                    day: "numeric", month: "short", year: "numeric"
+                });
+                var timePart = d.toLocaleTimeString(undefined, {
+                    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+                });
+                primary.textContent = datePart + ", " + timePart;
+            }
+        }
+    });
+})();
 </script>
 ';
 

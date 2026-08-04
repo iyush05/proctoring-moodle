@@ -559,6 +559,38 @@
     font-size: 0.8rem;
 }
 
+/* Time formatting in report */
+.proctor-time-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.proctor-time-primary {
+    font-weight: 500;
+    color: #263238;
+    white-space: nowrap;
+}
+
+.proctor-time-elapsed {
+    font-size: 0.72rem;
+    margin-top: 2px;
+}
+
+.proctor-badge-elapsed,
+.proctor-time-elapsed .badge {
+    display: inline-block !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    padding: 3px 8px !important;
+    border-radius: 6px !important;
+    background-color: #e2e8f0 !important;
+    color: #1e293b !important;
+    border: 1px solid #94a3b8 !important;
+    line-height: 1.2 !important;
+    text-shadow: none !important;
+}
+
 /* ============================================
    RESPONSIVE DESIGN
    ============================================ */

@@ -630,7 +630,8 @@ function (Ajax, Notification, Str, ObjectDetector) {
                 status: worstResult.status,
                 confidence: worstResult.confidence >= 0 ? worstResult.confidence : 0,
                 imagedata: imageData,
-                objectsdetected: worstResult.objectsDetected || ''
+                objectsdetected: worstResult.objectsDetected || '',
+                timestamp: Math.floor((worstResult.timestamp || Date.now()) / 1000)
             }
         }])[0].then(function (result) {
             if (result.success) {

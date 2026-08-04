@@ -50,6 +50,7 @@ class store_snapshot extends external_api {
             'confidence' => new external_value(PARAM_FLOAT, 'Face match confidence score (Euclidean distance)', VALUE_DEFAULT, 0),
             'imagedata'  => new external_value(PARAM_RAW, 'Base64 encoded snapshot image', VALUE_DEFAULT, ''),
             'objectsdetected' => new external_value(PARAM_TEXT, 'Comma-separated list of detected prohibited objects', VALUE_DEFAULT, ''),
+            'timestamp'  => new external_value(PARAM_INT, 'Client-side UNIX timestamp of snapshot (in seconds)', VALUE_DEFAULT, 0),
         ]);
     }
 
@@ -62,6 +63,8 @@ class store_snapshot extends external_api {
      * @param string $status Detection status.
      * @param float $confidence Face match confidence score.
      * @param string $imagedata Base64 encoded image.
+     * @param string $objectsdetected Comma-separated list of prohibited objects.
+     * @param int $timestamp Client-side UNIX timestamp (seconds).
      * @return array Result with success status.
      */
     public static function execute(
@@ -71,7 +74,8 @@ class store_snapshot extends external_api {
         string $status,
         float $confidence = 0,
         string $imagedata = '',
-        string $objectsdetected = ''
+        string $objectsdetected = '',
+        int $timestamp = 0
     ): array {
         global $DB, $USER;
 
@@ -84,6 +88,7 @@ class store_snapshot extends external_api {
             'confidence' => $confidence,
             'imagedata'  => $imagedata,
             'objectsdetected' => $objectsdetected,
+            'timestamp'  => $timestamp,
         ]);
 
         // Validate the status value.
@@ -101,6 +106,13 @@ class store_snapshot extends external_api {
             $params['imagedata'] = '';
         }
 
+        // Determine creation timestamp (prefer client timestamp if valid and reasonable).
+        $now = time();
+        $timecreated = $now;
+        if (!empty($params['timestamp']) && $params['timestamp'] > ($now - 86400) && $params['timestamp'] < ($now + 300)) {
+            $timecreated = (int) $params['timestamp'];
+        }
+
         // Insert the log record.
         $record = (object) [
             'courseid'         => $params['courseid'],
@@ -111,7 +123,7 @@ class store_snapshot extends external_api {
             'confidence'       => $params['confidence'],
             'image_data'       => $params['imagedata'],
             'objects_detected' => clean_param(substr($params['objectsdetected'], 0, 255), PARAM_TEXT),
-            'timecreated'      => time(),
+            'timecreated'      => $timecreated,
         ];
 
         $logid = $DB->insert_record('quizaccess_proctor_logs', $record);
