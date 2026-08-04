@@ -76,6 +76,7 @@ $matches = 0;
 $mismatches = 0;
 $noface = 0;
 $multiface = 0;
+$phonedetected = 0;
 $errors = 0;
 
 foreach ($logs as $log) {
@@ -92,6 +93,9 @@ foreach ($logs as $log) {
         case 'multiple_faces':
             $multiface++;
             break;
+        case 'phone_detected':
+            $phonedetected++;
+            break;
         case 'error':
             $errors++;
             break;
@@ -99,7 +103,7 @@ foreach ($logs as $log) {
 }
 
 $matchrate = $totalchecks > 0 ? round(($matches / $totalchecks) * 100, 1) : 0;
-$violations = $mismatches + $noface + $multiface;
+$violations = $mismatches + $noface + $multiface + $phonedetected;
 
 // Display summary cards.
 echo '<div class="proctor-report-container">';
@@ -125,6 +129,11 @@ echo '<div class="card-value">' . $noface . '</div>';
 echo '<div class="card-label">' . get_string('status_noface', 'quizaccess_proctor') . '</div>';
 echo '</div>';
 
+echo '<div class="proctor-summary-card" style="border-left: 3px solid #ff6d00;">';
+echo '<div class="card-value" style="color: #ff6d00;">' . $phonedetected . '</div>';
+echo '<div class="card-label">' . get_string('report_object_detections', 'quizaccess_proctor') . '</div>';
+echo '</div>';
+
 echo '</div>'; // End summary.
 
 // Display logs table.
@@ -138,6 +147,7 @@ if (empty($logs)) {
     echo '<th>' . get_string('report_time', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_status', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_confidence', 'quizaccess_proctor') . '</th>';
+    echo '<th>' . get_string('report_objects', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_snapshot', 'quizaccess_proctor') . '</th>';
     echo '</tr></thead>';
     echo '<tbody>';
@@ -152,6 +162,7 @@ if (empty($logs)) {
             'mismatch'       => ['class' => 'proctor-badge-mismatch',  'label' => get_string('status_mismatch', 'quizaccess_proctor')],
             'no_face'        => ['class' => 'proctor-badge-noface',    'label' => get_string('status_noface', 'quizaccess_proctor')],
             'multiple_faces' => ['class' => 'proctor-badge-multiface', 'label' => get_string('status_multiface', 'quizaccess_proctor')],
+            'phone_detected' => ['class' => 'proctor-badge-phone',     'label' => get_string('status_phone', 'quizaccess_proctor')],
             'error'          => ['class' => 'proctor-badge-error',     'label' => get_string('status_error', 'quizaccess_proctor')],
             'active'         => ['class' => 'proctor-badge-active',    'label' => get_string('status_active', 'quizaccess_proctor')],
         ];
@@ -178,6 +189,34 @@ if (empty($logs)) {
         echo '<td>' . $timestr . '</td>';
         echo '<td>' . $badgehtml . '</td>';
         echo '<td>' . $confidencestr . '</td>';
+
+        // Objects detected.
+        $objectshtml = '-';
+        if (!empty($log->objects_detected)) {
+            $objecticons = [
+                'cell phone' => '📱',
+                'book'       => '📖',
+                'laptop'     => '💻',
+                'remote'     => '🎮',
+                'tv'         => '📺',
+            ];
+            $objects = explode(',', $log->objects_detected);
+            $objectshtml = '<div class="proctor-object-pills">';
+            foreach ($objects as $obj) {
+                $obj = trim($obj);
+                if (empty($obj)) {
+                    continue;
+                }
+                $icon = isset($objecticons[$obj]) ? $objecticons[$obj] : '⚠';
+                $objectshtml .= '<span class="proctor-object-pill">';
+                $objectshtml .= '<span class="proctor-pill-icon">' . $icon . '</span>';
+                $objectshtml .= s(ucfirst($obj));
+                $objectshtml .= '</span>';
+            }
+            $objectshtml .= '</div>';
+        }
+        echo '<td>' . $objectshtml . '</td>';
+
         echo '<td>' . $snapshothtml . '</td>';
         echo '</tr>';
     }

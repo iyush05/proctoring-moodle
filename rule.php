@@ -227,6 +227,16 @@ class quizaccess_proctor extends access_rule_base {
                 true
             );
 
+            // Load TensorFlow.js and COCO-SSD for object detection.
+            $page->requires->js(
+                new moodle_url('/mod/quiz/accessrule/proctor/thirdparty/tf.min.js'),
+                true
+            );
+            $page->requires->js(
+                new moodle_url('/mod/quiz/accessrule/proctor/thirdparty/coco-ssd.min.js'),
+                true
+            );
+
             // Insert a proctoring session log.
             $record = (object) [
                 'courseid'    => $COURSE->id,
@@ -253,6 +263,14 @@ class quizaccess_proctor extends access_rule_base {
                 'reportInterval'  => 15000, // Send report to server every 15 seconds.
                 'matchThreshold'  => 0.50,  // Stricter Euclidean distance threshold (default was 0.6).
                 'quizUrl'         => (new moodle_url('/mod/quiz/view.php', ['id' => $cmid]))->out(),
+                // Object detection config.
+                'objectDetectionEnabled'     => true,
+                'cocoModelUrl'               => $CFG->wwwroot
+                    . '/mod/quiz/accessrule/proctor/thirdparty/coco-ssd-model/model.json',
+                'objectDetectionInterval'    => 3000,  // Object detection every 3 seconds.
+                'objectPersistenceThreshold' => 2,     // Must appear in 2 consecutive frames.
+                'objectScoreThreshold'       => 0.5,   // 50% minimum confidence.
+                'prohibitedObjects'          => ['cell phone', 'book', 'laptop'],
             ];
 
             $page->requires->js_call_amd('quizaccess_proctor/proctoring', 'init', [$jsconfig]);

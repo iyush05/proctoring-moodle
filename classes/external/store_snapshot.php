@@ -46,9 +46,10 @@ class store_snapshot extends external_api {
             'attemptid'  => new external_value(PARAM_INT, 'Quiz attempt ID'),
             'quizid'     => new external_value(PARAM_INT, 'Quiz ID'),
             'courseid'   => new external_value(PARAM_INT, 'Course ID'),
-            'status'     => new external_value(PARAM_ALPHA, 'Detection status: match, mismatch, no_face, multiple_faces, error'),
+            'status'     => new external_value(PARAM_ALPHANUMEXT, 'Detection status: match, mismatch, no_face, multiple_faces, phone_detected, error'),
             'confidence' => new external_value(PARAM_FLOAT, 'Face match confidence score (Euclidean distance)', VALUE_DEFAULT, 0),
             'imagedata'  => new external_value(PARAM_RAW, 'Base64 encoded snapshot image', VALUE_DEFAULT, ''),
+            'objectsdetected' => new external_value(PARAM_TEXT, 'Comma-separated list of detected prohibited objects', VALUE_DEFAULT, ''),
         ]);
     }
 
@@ -69,7 +70,8 @@ class store_snapshot extends external_api {
         int $courseid,
         string $status,
         float $confidence = 0,
-        string $imagedata = ''
+        string $imagedata = '',
+        string $objectsdetected = ''
     ): array {
         global $DB, $USER;
 
@@ -81,10 +83,11 @@ class store_snapshot extends external_api {
             'status'     => $status,
             'confidence' => $confidence,
             'imagedata'  => $imagedata,
+            'objectsdetected' => $objectsdetected,
         ]);
 
         // Validate the status value.
-        $validstatuses = ['match', 'mismatch', 'no_face', 'multiple_faces', 'error', 'active'];
+        $validstatuses = ['match', 'mismatch', 'no_face', 'multiple_faces', 'phone_detected', 'error', 'active'];
         if (!in_array($params['status'], $validstatuses)) {
             $params['status'] = 'error';
         }
@@ -100,14 +103,15 @@ class store_snapshot extends external_api {
 
         // Insert the log record.
         $record = (object) [
-            'courseid'    => $params['courseid'],
-            'quizid'      => $params['quizid'],
-            'userid'      => $USER->id,
-            'attemptid'   => $params['attemptid'],
-            'status'      => $params['status'],
-            'confidence'  => $params['confidence'],
-            'image_data'  => $params['imagedata'],
-            'timecreated' => time(),
+            'courseid'         => $params['courseid'],
+            'quizid'           => $params['quizid'],
+            'userid'           => $USER->id,
+            'attemptid'        => $params['attemptid'],
+            'status'           => $params['status'],
+            'confidence'       => $params['confidence'],
+            'image_data'       => $params['imagedata'],
+            'objects_detected' => clean_param(substr($params['objectsdetected'], 0, 255), PARAM_TEXT),
+            'timecreated'      => time(),
         ];
 
         $logid = $DB->insert_record('quizaccess_proctor_logs', $record);

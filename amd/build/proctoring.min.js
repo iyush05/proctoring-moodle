@@ -1,19 +1,25 @@
 /**
- * Main proctoring engine — continuous client-side face detection & matching.
+ * Main proctoring engine — continuous client-side face detection, matching,
+ * and phone/object detection.
  *
- * Uses @vladmandic/face-api (loaded globally) to:
+ * Uses @vladmandic/face-api (loaded globally) for face detection and
+ * TensorFlow.js COCO-SSD (via object_detector module) for phone/object detection.
+ *
+ * Detection pipeline:
  * 1. Capture webcam stream
- * 2. Continuously detect faces using TinyFaceDetector
+ * 2. Continuously detect faces using TinyFaceDetector (every 2s)
  * 3. Match detected face against student's profile picture descriptor
- * 4. Report results to server via Moodle AJAX
- * 5. Display real-time status overlay on quiz page
+ * 4. Continuously detect prohibited objects using COCO-SSD (every 3s)
+ * 5. Merge results and report violations to server via Moodle AJAX
+ * 6. Display real-time status overlay on quiz page
  *
  * @module     quizaccess_proctor/proctoring
  * @package    quizaccess_proctor
  * @copyright  2026 Ayush Kannaujiya
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notification, Str) {
+define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object_detector'],
+function (Ajax, Notification, Str, ObjectDetector) {
 
     /** @type {Object} Configuration passed from PHP. */
     let config = {};
@@ -30,8 +36,11 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
     /** @type {Float32Array|null} Reference face descriptor from profile picture. */
     let referenceDescriptor = null;
 
-    /** @type {boolean} Whether models have been loaded. */
+    /** @type {boolean} Whether face detection models have been loaded. */
     let modelsLoaded = false;
+
+    /** @type {boolean} Whether the object detection model is loaded and ready. */
+    let objectDetectorReady = false;
 
     /** @type {boolean} Whether the proctoring engine is active. */
     let isActive = false;
@@ -45,11 +54,15 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
     /** @type {Array} Buffer of detection results for batched reporting. */
     let resultBuffer = [];
 
+    /** @type {number} Timestamp of the last immediate violation report sent. */
+    let lastViolationReportTime = 0;
+
     /** @type {Object} Current detection state for UI updates. */
     let currentState = {
         status: 'initializing',
         confidence: 0,
-        faceCount: 0
+        faceCount: 0,
+        objectsDetected: []
     };
 
     /**
@@ -80,7 +93,23 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
                 updateOverlayStatus('warning', 'No profile picture — detection only');
             }
 
-            // Step 4: Start continuous detection.
+            // Step 4: Load object detection model (if enabled).
+            if (config.objectDetectionEnabled) {
+                updateOverlayStatus('loading', 'Loading object detection model...');
+                try {
+                    objectDetectorReady = await ObjectDetector.init(config);
+                    if (objectDetectorReady) {
+                        console.log('[Proctor] Object detection model loaded');
+                    } else {
+                        console.warn('[Proctor] Object detection failed to load — continuing without it');
+                    }
+                } catch (objErr) {
+                    console.warn('[Proctor] Object detection init error:', objErr);
+                    objectDetectorReady = false;
+                }
+            }
+
+            // Step 5: Start continuous detection.
             isActive = true;
             startDetectionLoop();
             startReportLoop();
@@ -370,11 +399,24 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
             }
         }
 
+        // Run object detection if enabled and ready.
+        let objectResult = { isViolation: false, detections: [], confirmedObjects: [] };
+        if (objectDetectorReady) {
+            objectResult = await ObjectDetector.detect(videoEl);
+        }
+
+        // Merge face + object detection results.
+        // If a prohibited object is detected, it is an active prohibited device violation.
+        if (objectResult.isViolation) {
+            status = 'phone_detected';
+        }
+
         // Update state.
         currentState = {
             status: status,
             confidence: confidence,
-            faceCount: detections.length
+            faceCount: detections.length,
+            objectsDetected: objectResult.confirmedObjects || []
         };
 
         // Capture an immediate snapshot if there is a violation.
@@ -386,7 +428,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
                 tempCanvas.height = 240;
                 const tempCtx = tempCanvas.getContext('2d');
                 tempCtx.drawImage(videoEl, 0, 0, 320, 240);
-                imageData = tempCanvas.toDataURL('image/jpeg', 0.5);
+                imageData = tempCanvas.toDataURL('image/jpeg', 0.6);
             } catch (e) {
                 imageData = '';
             }
@@ -397,11 +439,21 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
             status: status,
             confidence: confidence,
             imageData: imageData,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            objectsDetected: (objectResult.confirmedObjects || []).join(',')
         });
 
         // Update UI.
         updateOverlayFromState();
+
+        // If a prohibited object is detected, send an immediate debounced report (cooldown: 5s).
+        if (status === 'phone_detected') {
+            const now = Date.now();
+            if (now - lastViolationReportTime > 5000) {
+                lastViolationReportTime = now;
+                sendReport();
+            }
+        }
     }
 
     /**
@@ -422,21 +474,27 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
         const ctx = canvasEl.getContext('2d');
         ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
+        // The webcam video is mirrored horizontally via CSS scaleX(-1).
+        // To keep text normal (non-mirrored) and readable, the canvas itself is not mirrored in CSS,
+        // and we mirror the horizontal X coordinate of boxes when rendering:
+        // mirroredX = displaySize.width - boxX - boxWidth.
+
         if (detections.length > 0) {
             const resized = faceapi.resizeResults(detections, displaySize);
 
             // Draw boxes with color based on match status.
             resized.forEach(function (det) {
                 const box = det.detection.box;
+                const mirroredX = displaySize.width - box.x - box.width;
                 const color = currentState.status === 'match' ? '#00e676' :
                     currentState.status === 'mismatch' ? '#ff1744' :
                         currentState.status === 'multiple_faces' ? '#ff9100' : '#2979ff';
 
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 2;
-                ctx.strokeRect(box.x, box.y, box.width, box.height);
+                ctx.strokeRect(mirroredX, box.y, box.width, box.height);
 
-                // Draw confidence label.
+                // Draw confidence label (unmirrored, perfectly readable).
                 if (currentState.confidence > 0) {
                     const threshold = config.matchThreshold || 0.50;
                     const label = (currentState.confidence < threshold)
@@ -444,9 +502,50 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
                         : '✗ Dist: ' + currentState.confidence.toFixed(2);
                     ctx.fillStyle = color;
                     ctx.font = '12px Inter, sans-serif';
-                    ctx.fillText(label, box.x, box.y - 5);
+                    ctx.fillText(label, mirroredX, box.y - 5);
                 }
             });
+        }
+
+        // Draw object detection bounding boxes (if any).
+        if (objectDetectorReady) {
+            var objState = ObjectDetector.getState();
+            if (objState.detections && objState.detections.length > 0) {
+                // Calculate scale factors from video native size to display size.
+                var scaleX = displaySize.width / (videoEl.videoWidth || 640);
+                var scaleY = displaySize.height / (videoEl.videoHeight || 480);
+
+                objState.detections.forEach(function (det) {
+                    var bbox = det.bbox; // [x, y, width, height]
+                    var isConfirmed = objState.confirmedObjects.indexOf(det.class) !== -1;
+                    var objColor = isConfirmed ? '#ff6d00' : '#ffd600';
+
+                    // Scale bounding box to display dimensions.
+                    var bx = bbox[0] * scaleX;
+                    var by = bbox[1] * scaleY;
+                    var bw = bbox[2] * scaleX;
+                    var bh = bbox[3] * scaleY;
+
+                    // Mirror X coordinate for overlay alignment with mirrored video.
+                    var mirroredObjX = displaySize.width - bx - bw;
+
+                    ctx.strokeStyle = objColor;
+                    ctx.lineWidth = isConfirmed ? 3 : 2;
+                    ctx.setLineDash(isConfirmed ? [] : [6, 3]);
+                    ctx.strokeRect(mirroredObjX, by, bw, bh);
+                    ctx.setLineDash([]);
+
+                    // Draw label (unmirrored, readable left-to-right).
+                    var label = ObjectDetector.getDisplayLabel(det.class) +
+                        ' ' + Math.round(det.score * 100) + '%';
+                    ctx.fillStyle = objColor;
+                    ctx.font = 'bold 11px Inter, sans-serif';
+                    var labelWidth = ctx.measureText(label).width;
+                    ctx.fillRect(mirroredObjX, by - 16, labelWidth + 8, 16);
+                    ctx.fillStyle = '#000';
+                    ctx.fillText(label, mirroredObjX + 4, by - 4);
+                });
+            }
         }
     }
 
@@ -474,11 +573,20 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
             return;
         }
 
-        // Priority order: mismatch > multiple_faces > no_face > error > match.
-        const priorityOrder = ['mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
+        // Priority order: phone_detected > mismatch > multiple_faces > no_face > error > match.
+        const priorityOrder = ['phone_detected', 'mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
         let worstResult = resultBuffer[0];
+        let allObjects = [];
 
         resultBuffer.forEach(function (r) {
+            if (r.objectsDetected) {
+                r.objectsDetected.split(',').forEach(function (obj) {
+                    const trimmed = obj.trim();
+                    if (trimmed && allObjects.indexOf(trimmed) === -1) {
+                        allObjects.push(trimmed);
+                    }
+                });
+            }
             const currentPriority = priorityOrder.indexOf(r.status);
             const worstPriority = priorityOrder.indexOf(worstResult.status);
             if (currentPriority < worstPriority) {
@@ -486,13 +594,29 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
             }
         });
 
+        // Ensure detected objects are preserved on the worstResult.
+        if (allObjects.length > 0 && !worstResult.objectsDetected) {
+            worstResult.objectsDetected = allObjects.join(',');
+        }
+
         // Use the snapshot captured at the exact moment of the violation.
         let imageData = worstResult.imageData || '';
 
+        // If worstResult has no imageData but another violation in buffer has one, use that.
+        if (!imageData) {
+            for (let i = 0; i < resultBuffer.length; i++) {
+                if (resultBuffer[i].imageData) {
+                    imageData = resultBuffer[i].imageData;
+                    break;
+                }
+            }
+        }
+
+        // Clear buffer before sending to avoid race conditions.
+        resultBuffer = [];
+
         // If there were no violations in this batch (perfect match), do NOT send network request.
-        // This prevents polluting the database with "Match" logs and follows enterprise architecture.
         if (worstResult.status === 'match') {
-            resultBuffer = [];
             return;
         }
 
@@ -505,18 +629,16 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
                 courseid: config.courseId,
                 status: worstResult.status,
                 confidence: worstResult.confidence >= 0 ? worstResult.confidence : 0,
-                imagedata: imageData
+                imagedata: imageData,
+                objectsdetected: worstResult.objectsDetected || ''
             }
         }])[0].then(function (result) {
             if (result.success) {
-                console.log('[Proctor] Report sent, logId:', result.logid);
+                console.log('[Proctor] Violation report sent, logId:', result.logid, 'status:', worstResult.status, 'objects:', worstResult.objectsDetected);
             }
         }).catch(function (err) {
             console.error('[Proctor] Failed to send report:', err);
         });
-
-        // Clear buffer.
-        resultBuffer = [];
     }
 
     /**
@@ -561,6 +683,13 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
                 statusText.textContent = 'Multiple faces detected';
                 title.textContent = 'Proctoring ⚠';
                 showWarning('Multiple faces detected — only one person should be visible.');
+                break;
+
+            case 'phone_detected':
+                indicator.className = 'proctor-overlay-indicator proctor-status-phone';
+                statusText.textContent = 'Prohibited object detected';
+                title.textContent = 'Proctoring ⚠';
+                showWarning('Prohibited object detected — please don\'t use unfair means.');
                 break;
 
             case 'error':
@@ -652,6 +781,9 @@ define(['core/ajax', 'core/notification', 'core/str'], function (Ajax, Notificat
             clearInterval(reportTimer);
             reportTimer = null;
         }
+
+        // Stop object detector.
+        ObjectDetector.stop();
 
         // Send any remaining results.
         if (resultBuffer.length > 0) {

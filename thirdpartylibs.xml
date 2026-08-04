@@ -14,4 +14,25 @@
         <license>MIT</license>
         <licenseversion></licenseversion>
     </library>
+    <library>
+        <location>thirdparty/tf.min.js</location>
+        <name>@tensorflow/tfjs</name>
+        <version>4.22.0</version>
+        <license>Apache-2.0</license>
+        <licenseversion>2.0</licenseversion>
+    </library>
+    <library>
+        <location>thirdparty/coco-ssd.min.js</location>
+        <name>@tensorflow-models/coco-ssd</name>
+        <version>2.2.3</version>
+        <license>Apache-2.0</license>
+        <licenseversion>2.0</licenseversion>
+    </library>
+    <library>
+        <location>thirdparty/coco-ssd-model</location>
+        <name>COCO-SSD lite_mobilenet_v2 model weights</name>
+        <version>2.2.3</version>
+        <license>Apache-2.0</license>
+        <licenseversion>2.0</licenseversion>
+    </library>
 </libraries>

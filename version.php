@@ -25,7 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'quizaccess_proctor';
-$plugin->release = '1.0.0';
-$plugin->version = 2026072400;
+$plugin->release = '1.1.0';
+$plugin->version = 2026080400;
 $plugin->requires = 2024040100; // Moodle 4.4+.
 $plugin->maturity = MATURITY_ALPHA;

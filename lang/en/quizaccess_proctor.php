@@ -84,9 +84,19 @@ $string['status_match'] = 'Match';
 $string['status_mismatch'] = 'Mismatch';
 $string['status_noface'] = 'No face';
 $string['status_multiface'] = 'Multiple faces';
+$string['status_phone'] = 'Phone/object detected';
+$string['status_phone_detected'] = 'Phone/object detected';
 $string['status_error'] = 'Error';
 $string['status_active'] = 'Active';
+
+// Object detection.
+$string['object_detected_warning'] = 'Prohibited object detected — please don\'t use unfair means.';
+$string['loading_object_detection'] = 'Loading object detection model...';
+$string['object_detection_ready'] = 'Object detection active';
+$string['report_objects'] = 'Objects';
+$string['report_object_detections'] = 'Object detections';
 
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';
 $string['error_model_load'] = 'Failed to load face detection models. Please refresh the page and try again.';
+
