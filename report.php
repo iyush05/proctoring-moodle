@@ -79,6 +79,7 @@ $mismatches = 0;
 $noface = 0;
 $multiface = 0;
 $phonedetected = 0;
+$lookingaway = 0;
 $errors = 0;
 
 foreach ($logs as $log) {
@@ -98,6 +99,9 @@ foreach ($logs as $log) {
         case 'phone_detected':
             $phonedetected++;
             break;
+        case 'looking_away':
+            $lookingaway++;
+            break;
         case 'error':
             $errors++;
             break;
@@ -105,7 +109,7 @@ foreach ($logs as $log) {
 }
 
 $matchrate = $totalchecks > 0 ? round(($matches / $totalchecks) * 100, 1) : 0;
-$violations = $mismatches + $noface + $multiface + $phonedetected;
+$violations = $mismatches + $noface + $multiface + $phonedetected + $lookingaway;
 
 // Display summary cards.
 echo '<div class="proctor-report-container">';
@@ -136,6 +140,11 @@ echo '<div class="card-value" style="color: #ff6d00;">' . $phonedetected . '</di
 echo '<div class="card-label">' . get_string('report_object_detections', 'quizaccess_proctor') . '</div>';
 echo '</div>';
 
+echo '<div class="proctor-summary-card" style="border-left: 3px solid #d500f9;">';
+echo '<div class="card-value" style="color: #d500f9;">' . $lookingaway . '</div>';
+echo '<div class="card-label">' . get_string('gazeviolations', 'quizaccess_proctor') . '</div>';
+echo '</div>';
+
 echo '</div>'; // End summary.
 
 // Display logs table.
@@ -150,6 +159,7 @@ if (empty($logs)) {
     echo '<th>' . get_string('report_status', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_confidence', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_objects', 'quizaccess_proctor') . '</th>';
+    echo '<th>' . get_string('gazeviolations', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_snapshot', 'quizaccess_proctor') . '</th>';
     echo '</tr></thead>';
     echo '<tbody>';
@@ -185,6 +195,7 @@ if (empty($logs)) {
             'no_face'        => ['class' => 'proctor-badge-noface',    'label' => get_string('status_noface', 'quizaccess_proctor')],
             'multiple_faces' => ['class' => 'proctor-badge-multiface', 'label' => get_string('status_multiface', 'quizaccess_proctor')],
             'phone_detected' => ['class' => 'proctor-badge-phone',     'label' => get_string('status_phone', 'quizaccess_proctor')],
+            'looking_away'   => ['class' => 'proctor-badge-gaze',      'label' => get_string('snapshotstatus_looking_away', 'quizaccess_proctor')],
             'error'          => ['class' => 'proctor-badge-error',     'label' => get_string('status_error', 'quizaccess_proctor')],
             'active'         => ['class' => 'proctor-badge-active',    'label' => get_string('status_active', 'quizaccess_proctor')],
         ];
@@ -238,6 +249,18 @@ if (empty($logs)) {
             $objectshtml .= '</div>';
         }
         echo '<td>' . $objectshtml . '</td>';
+
+        // Gaze data.
+        $gazehtml = '-';
+        if (!empty($log->gaze_data)) {
+            $gaze = explode(',', $log->gaze_data);
+            if (count($gaze) >= 3) {
+                $dir = get_string('direction_' . trim($gaze[0]), 'quizaccess_proctor');
+                $gazeobj = (object)['direction' => $dir, 'yaw' => trim($gaze[1]), 'pitch' => trim($gaze[2])];
+                $gazehtml = '<span style="font-size:0.85rem;">' . get_string('gaze_data_log', 'quizaccess_proctor', $gazeobj) . '</span>';
+            }
+        }
+        echo '<td>' . $gazehtml . '</td>';
 
         echo '<td>' . $snapshothtml . '</td>';
         echo '</tr>';

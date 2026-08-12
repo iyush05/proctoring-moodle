@@ -221,21 +221,12 @@ class quizaccess_proctor extends access_rule_base {
             // Model URL for face-api.js.
             $modelurl = $CFG->wwwroot . '/mod/quiz/accessrule/proctor/thirdparty/models';
 
-            // Load face-api.js library.
-            $page->requires->js(
-                new moodle_url('/mod/quiz/accessrule/proctor/thirdparty/face-api.min.js'),
-                true
-            );
-
-            // Load TensorFlow.js and COCO-SSD for object detection.
-            $page->requires->js(
-                new moodle_url('/mod/quiz/accessrule/proctor/thirdparty/tf.min.js'),
-                true
-            );
-            $page->requires->js(
-                new moodle_url('/mod/quiz/accessrule/proctor/thirdparty/coco-ssd.min.js'),
-                true
-            );
+            // Load libraries in specific order to avoid tf.js version conflicts!
+            // face-api bundles an older tf.js which must not overwrite the newer tf.min.js.
+            $page->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/face-api.min.js'), true);
+            $page->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/tf.min.js'), true);
+            $page->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/coco-ssd.min.js'), true);
+            $page->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/face-landmarks-detection.min.js'), true);
 
             // Insert a proctoring session log.
             $record = (object) [
@@ -271,6 +262,12 @@ class quizaccess_proctor extends access_rule_base {
                 'objectPersistenceThreshold' => 2,     // Must appear in 2 consecutive frames.
                 'objectScoreThreshold'       => 0.5,   // 50% minimum confidence.
                 'prohibitedObjects'          => ['cell phone', 'book', 'laptop'],
+                
+                // Gaze tracking config
+                'gazeYawThreshold' => 30,
+                'gazePitchUpThreshold' => 20,
+                'gazePitchDownThreshold' => 15,
+                'gazePersistenceThreshold' => 3
             ];
 
             $page->requires->js_call_amd('quizaccess_proctor/proctoring', 'init', [$jsconfig]);

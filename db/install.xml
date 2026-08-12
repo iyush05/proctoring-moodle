@@ -33,15 +33,18 @@
                 <FIELD NAME="attemptid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"
                        COMMENT="Quiz attempt ID"/>
                 <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="active" SEQUENCE="false"
-                       COMMENT="Detection status: match, mismatch, no_face, multiple_faces, phone_detected, error, active"/>
+                       COMMENT="Detection status: match, mismatch, no_face, multiple_faces, phone_detected, looking_away, error, active"/>
                 <FIELD NAME="confidence" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="false" SEQUENCE="false"
                        COMMENT="Face match distance score (lower = better match)"/>
                 <FIELD NAME="image_data" TYPE="text" NOTNULL="false" SEQUENCE="false"
                        COMMENT="Base64 encoded snapshot image for review"/>
                 <FIELD NAME="objects_detected" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false"
                        COMMENT="Comma-separated list of prohibited objects detected (e.g. cell phone,book)"/>
+                <FIELD NAME="gaze_data" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="Gaze tracking data: direction,yaw,pitch (e.g. left,-35.2,5.1)"/>
                 <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
                        COMMENT="Timestamp of this log entry"/>
+
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

@@ -1,0 +1,1 @@
+{"name":"tmp","version":"1.0.0","private":true,"dependencies":{"@tensorflow-models/face-detection":"^1.0.3","@tensorflow-models/face-landmarks-detection":"^1.0.6","@tensorflow/tfjs":"^4.22.0","@tensorflow/tfjs-node":"^4.22.0","terser":"^5.50.0"}}

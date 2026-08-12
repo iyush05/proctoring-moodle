@@ -56,5 +56,27 @@ function xmldb_quizaccess_proctor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026080400, 'quizaccess', 'proctor');
     }
 
+    if ($oldversion < 2026081200) {
+        // Add 'gaze_data' field to quizaccess_proctor_logs table.
+        $table = new xmldb_table('quizaccess_proctor_logs');
+        $field = new xmldb_field(
+            'gaze_data',
+            XMLDB_TYPE_CHAR,
+            '100',
+            null,
+            null,
+            null,
+            null,
+            'objects_detected'
+        );
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026081200, 'quizaccess', 'proctor');
+    }
+
     return true;
 }
+

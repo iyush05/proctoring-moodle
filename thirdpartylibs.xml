@@ -35,4 +35,18 @@
         <license>Apache-2.0</license>
         <licenseversion>2.0</licenseversion>
     </library>
+    <library>
+        <location>thirdparty/face-landmarks-detection.min.js</location>
+        <name>@tensorflow-models/face-landmarks-detection</name>
+        <version>1.0.6</version>
+        <license>Apache-2.0</license>
+        <licenseversion>2.0</licenseversion>
+    </library>
+    <library>
+        <location>thirdparty/facemesh-model</location>
+        <name>MediaPipe FaceMesh attention_mesh + face_detection model weights</name>
+        <version>1.0.0</version>
+        <license>Apache-2.0</license>
+        <licenseversion>2.0</licenseversion>
+    </library>
 </libraries>

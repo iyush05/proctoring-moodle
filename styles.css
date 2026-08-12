@@ -592,6 +592,28 @@
 }
 
 /* ============================================
+   GAZE TRACKING STYLES
+   ============================================ */
+
+/* Gaze tracking status indicator (flashing cyan/purple) */
+.proctor-status-gaze {
+    background: #d500f9;
+    box-shadow: 0 0 8px rgba(213, 0, 249, 0.6);
+    animation: pulse-glow-purple 1.2s infinite;
+}
+
+@keyframes pulse-glow-purple {
+    0%, 100% { box-shadow: 0 0 4px rgba(213, 0, 249, 0.4); }
+    50% { box-shadow: 0 0 14px rgba(213, 0, 249, 0.9); }
+}
+
+/* Gaze badge for report table */
+.proctor-badge-gaze {
+    background: rgba(213, 0, 249, 0.15);
+    color: #aa00ff;
+}
+
+/* ============================================
    RESPONSIVE DESIGN
    ============================================ */
 
@@ -611,4 +633,5 @@
         max-width: 100%;
     }
 }
+
 

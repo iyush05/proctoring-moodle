@@ -18,8 +18,8 @@
  * @copyright  2026 Ayush Kannaujiya
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object_detector'],
-function (Ajax, Notification, Str, ObjectDetector) {
+define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object_detector', 'quizaccess_proctor/gaze_tracker'],
+function (Ajax, Notification, Str, ObjectDetector, GazeTracker) {
 
     /** @type {Object} Configuration passed from PHP. */
     let config = {};
@@ -42,6 +42,9 @@ function (Ajax, Notification, Str, ObjectDetector) {
     /** @type {boolean} Whether the object detection model is loaded and ready. */
     let objectDetectorReady = false;
 
+    /** @type {boolean} Whether the gaze tracking model is loaded and ready. */
+    let gazeTrackerReady = false;
+
     /** @type {boolean} Whether the proctoring engine is active. */
     let isActive = false;
 
@@ -59,10 +62,13 @@ function (Ajax, Notification, Str, ObjectDetector) {
 
     /** @type {Object} Current detection state for UI updates. */
     let currentState = {
-        status: 'initializing',
+        faceStatus: 'active',
         confidence: 0,
-        faceCount: 0,
-        objectsDetected: []
+        objectViolation: false,
+        worstObject: null,
+        gazeViolation: false,
+        gazeDirection: 'center',
+        gazeData: ''
     };
 
     /**
@@ -97,12 +103,17 @@ function (Ajax, Notification, Str, ObjectDetector) {
             if (config.objectDetectionEnabled) {
                 updateOverlayStatus('loading', 'Loading object detection model...');
                 try {
-                    objectDetectorReady = await ObjectDetector.init(config);
-                    if (objectDetectorReady) {
-                        console.log('[Proctor] Object detection model loaded');
-                    } else {
-                        console.warn('[Proctor] Object detection failed to load — continuing without it');
-                    }
+                    // Load object detection model in background.
+                    ObjectDetector.init(config).then(function(ready) {
+                        objectDetectorReady = ready;
+                    });
+
+                    // Load gaze tracking model in background.
+                    GazeTracker.init(config).then(function(ready) {
+                        gazeTrackerReady = ready;
+                    });
+                    
+                    console.log('[Proctor] Object detection model loaded');
                 } catch (objErr) {
                     console.warn('[Proctor] Object detection init error:', objErr);
                     objectDetectorReady = false;
@@ -229,7 +240,9 @@ function (Ajax, Notification, Str, ObjectDetector) {
             videoEl.srcObject = stream;
             await videoEl.play();
 
-            // Set canvas dimensions to match video.
+            // Set element dimensions to match video. Required for TF.js models.
+            videoEl.width = videoEl.videoWidth || 640;
+            videoEl.height = videoEl.videoHeight || 480;
             canvasEl.width = videoEl.videoWidth || 640;
             canvasEl.height = videoEl.videoHeight || 480;
 
@@ -405,18 +418,39 @@ function (Ajax, Notification, Str, ObjectDetector) {
             objectResult = await ObjectDetector.detect(videoEl);
         }
 
-        // Merge face + object detection results.
-        // If a prohibited object is detected, it is an active prohibited device violation.
+        // Run gaze tracking if enabled and ready.
+        let gazeResult = { isViolation: false, direction: 'center', gazeData: '' };
+        if (gazeTrackerReady) {
+            try {
+                let gtState = await GazeTracker.analyze(videoEl);
+                console.log('[Proctor Debug] GazeTracker.analyze returned:', gtState);
+                gazeResult = {
+                    isViolation: gtState.isViolation,
+                    direction: gtState.direction,
+                    gazeData: GazeTracker.formatForReport()
+                };
+            } catch (e) {
+                console.error('[Proctor] Gaze tracking error:', e);
+            }
+        }
+
+        // Merge face + object + gaze detection results.
+        // Highest priority: Object detection (phone) > Gaze (looking away) > Face match.
         if (objectResult.isViolation) {
             status = 'phone_detected';
+        } else if (gazeResult.isViolation) {
+            status = 'looking_away';
         }
 
         // Update state.
         currentState = {
-            status: status,
+            faceStatus: status,
             confidence: confidence,
-            faceCount: detections.length,
-            objectsDetected: objectResult.confirmedObjects || []
+            objectViolation: objectResult.isViolation,
+            worstObject: objectResult.confirmedObjects.length > 0 ? objectResult.confirmedObjects[0] : null,
+            gazeViolation: gazeResult.isViolation,
+            gazeDirection: gazeResult.direction,
+            gazeData: gazeResult.gazeData
         };
 
         // Capture an immediate snapshot if there is a violation.
@@ -440,14 +474,15 @@ function (Ajax, Notification, Str, ObjectDetector) {
             confidence: confidence,
             imageData: imageData,
             timestamp: Date.now(),
-            objectsDetected: (objectResult.confirmedObjects || []).join(',')
+            objectsDetected: (objectResult.confirmedObjects || []).join(','),
+            gazeData: gazeResult.gazeData
         });
 
         // Update UI.
         updateOverlayFromState();
 
-        // If a prohibited object is detected, send an immediate debounced report (cooldown: 5s).
-        if (status === 'phone_detected') {
+        // If a prohibited object is detected or gaze violation, send an immediate debounced report (cooldown: 5s).
+        if (status === 'phone_detected' || status === 'looking_away') {
             const now = Date.now();
             if (now - lastViolationReportTime > 5000) {
                 lastViolationReportTime = now;
@@ -573,8 +608,8 @@ function (Ajax, Notification, Str, ObjectDetector) {
             return;
         }
 
-        // Priority order: phone_detected > mismatch > multiple_faces > no_face > error > match.
-        const priorityOrder = ['phone_detected', 'mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
+        // Priority order: phone_detected > looking_away > mismatch > multiple_faces > no_face > error > match.
+        const priorityOrder = ['phone_detected', 'looking_away', 'mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
         let worstResult = resultBuffer[0];
         let allObjects = [];
 
@@ -631,6 +666,7 @@ function (Ajax, Notification, Str, ObjectDetector) {
                 confidence: worstResult.confidence >= 0 ? worstResult.confidence : 0,
                 imagedata: imageData,
                 objectsdetected: worstResult.objectsDetected || '',
+                gazedata: worstResult.gazeData || '',
                 timestamp: Math.floor((worstResult.timestamp || Date.now()) / 1000)
             }
         }])[0].then(function (result) {
@@ -656,7 +692,7 @@ function (Ajax, Notification, Str, ObjectDetector) {
             return;
         }
 
-        switch (currentState.status) {
+        switch (currentState.faceStatus) {
             case 'match':
                 indicator.className = 'proctor-overlay-indicator proctor-status-match';
                 statusText.textContent = 'Identity verified';
@@ -691,6 +727,13 @@ function (Ajax, Notification, Str, ObjectDetector) {
                 statusText.textContent = 'Prohibited object detected';
                 title.textContent = 'Proctoring ⚠';
                 showWarning('Prohibited object detected — please don\'t use unfair means.');
+                break;
+
+            case 'looking_away':
+                indicator.className = 'proctor-overlay-indicator proctor-status-gaze';
+                statusText.textContent = 'Looking away from screen';
+                title.textContent = 'Proctoring ⚠';
+                showWarning('Please look at the screen. Gaze tracking active.');
                 break;
 
             case 'error':

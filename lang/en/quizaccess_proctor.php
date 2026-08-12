@@ -86,11 +86,21 @@ $string['status_noface'] = 'No face';
 $string['status_multiface'] = 'Multiple faces';
 $string['status_phone'] = 'Phone/object detected';
 $string['status_phone_detected'] = 'Phone/object detected';
-$string['status_error'] = 'Error';
-$string['status_active'] = 'Active';
+$string['snapshotstatus_error'] = 'Detection Error';
+$string['snapshotstatus_looking_away'] = 'Looking Away';
+$string['objectdetected'] = 'Prohibited Object Detected';
+$string['objectdetected_help'] = 'A prohibited object (e.g., cell phone, book) was detected in the webcam feed.';
 
-// Object detection.
-$string['object_detected_warning'] = 'Prohibited object detected — please don\'t use unfair means.';
+// Gaze Tracking strings.
+$string['gazewarning'] = 'Please look at the screen';
+$string['gazestatus'] = 'Gaze: {$a}';
+$string['direction_center'] = 'Looking Forward';
+$string['direction_left'] = 'Looking Left';
+$string['direction_right'] = 'Looking Right';
+$string['direction_up'] = 'Looking Up';
+$string['direction_down'] = 'Looking Down';
+$string['gazeviolations'] = 'Gaze Violations';
+$string['gaze_data_log'] = 'Gaze: {$a->direction} (Y:{$a->yaw}°, P:{$a->pitch}°)';
 $string['loading_object_detection'] = 'Loading object detection model...';
 $string['object_detection_ready'] = 'Object detection active';
 $string['report_objects'] = 'Objects';
