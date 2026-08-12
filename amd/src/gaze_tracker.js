@@ -597,6 +597,8 @@ define([], function () {
             if (!faces || faces.length === 0) {
                 // No face detected — don't count as violation, just skip.
                 currentState.faceDetected = false;
+                currentState.isViolation = false;
+                violationCounter = 0;
                 return currentState;
             }
 
@@ -615,11 +617,9 @@ define([], function () {
 
             currentState.eyesOpen = avgEAR >= EAR_THRESHOLD;
 
-            if (!currentState.eyesOpen) {
-                // Eyes closed/blinking — skip gaze analysis for this frame.
-                // Don't increment or reset violation counter during blinks.
-                return currentState;
-            }
+            // We no longer return early when eyes are closed. Head pose tracking
+            // is still valid even if eyes are closed (e.g., looking down at keyboard).
+            // We just skip the iris tracking step below.
 
             // --- Step 2: Head pose estimation ---
             var headPose = estimateHeadPose(keypoints);
@@ -627,7 +627,9 @@ define([], function () {
             // --- Step 3: Stable anchor center + Iris offset ---
             var stableCenter = computeStableCenter(keypoints);
             var irisOffset = null;
-            if (keypoints.length >= 478) {
+            // Only calculate iris offset if eyes are open. If closed, the landmarks
+            // deform and provide garbage data for iris tracking.
+            if (currentState.eyesOpen && keypoints.length >= 478) {
                 irisOffset = calculateIrisOffset(keypoints, stableCenter);
             }
 

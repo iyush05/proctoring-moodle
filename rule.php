@@ -264,9 +264,9 @@ class quizaccess_proctor extends access_rule_base {
                 'prohibitedObjects'          => ['cell phone', 'book', 'laptop'],
                 
                 // Gaze tracking config
-                'gazeYawThreshold' => 30,
-                'gazePitchUpThreshold' => 20,
-                'gazePitchDownThreshold' => 15,
+                'gazeYawThreshold' => isset($this->quiz->gaze_yaw_threshold) ? (int)$this->quiz->gaze_yaw_threshold : 30,
+                'gazePitchUpThreshold' => isset($this->quiz->gaze_pitch_up_threshold) ? (int)$this->quiz->gaze_pitch_up_threshold : 20,
+                'gazePitchDownThreshold' => isset($this->quiz->gaze_pitch_down_threshold) ? (int)$this->quiz->gaze_pitch_down_threshold : 15,
                 'gazePersistenceThreshold' => 3
             ];
 
@@ -292,6 +292,21 @@ class quizaccess_proctor extends access_rule_base {
         );
         $mform->addHelpButton('proctor_enabled', 'enable_proctoring', 'quizaccess_proctor');
         $mform->setDefault('proctor_enabled', 0);
+
+        $mform->addElement('text', 'gaze_yaw_threshold', get_string('gaze_yaw_threshold', 'quizaccess_proctor'));
+        $mform->setType('gaze_yaw_threshold', PARAM_INT);
+        $mform->setDefault('gaze_yaw_threshold', 30);
+        $mform->addHelpButton('gaze_yaw_threshold', 'gaze_yaw_threshold', 'quizaccess_proctor');
+
+        $mform->addElement('text', 'gaze_pitch_up_threshold', get_string('gaze_pitch_up_threshold', 'quizaccess_proctor'));
+        $mform->setType('gaze_pitch_up_threshold', PARAM_INT);
+        $mform->setDefault('gaze_pitch_up_threshold', 20);
+        $mform->addHelpButton('gaze_pitch_up_threshold', 'gaze_pitch_up_threshold', 'quizaccess_proctor');
+
+        $mform->addElement('text', 'gaze_pitch_down_threshold', get_string('gaze_pitch_down_threshold', 'quizaccess_proctor'));
+        $mform->setType('gaze_pitch_down_threshold', PARAM_INT);
+        $mform->setDefault('gaze_pitch_down_threshold', 15);
+        $mform->addHelpButton('gaze_pitch_down_threshold', 'gaze_pitch_down_threshold', 'quizaccess_proctor');
     }
 
     /**
@@ -305,11 +320,18 @@ class quizaccess_proctor extends access_rule_base {
         if (empty($quiz->proctor_enabled)) {
             $DB->delete_records('quizaccess_proctor', ['quizid' => $quiz->id]);
         } else {
-            if (!$DB->record_exists('quizaccess_proctor', ['quizid' => $quiz->id])) {
-                $record = (object) [
-                    'quizid'          => $quiz->id,
-                    'proctor_enabled' => 1,
-                ];
+            $record = (object) [
+                'quizid'                    => $quiz->id,
+                'proctor_enabled'           => 1,
+                'gaze_yaw_threshold'        => isset($quiz->gaze_yaw_threshold) ? (int)$quiz->gaze_yaw_threshold : 30,
+                'gaze_pitch_up_threshold'   => isset($quiz->gaze_pitch_up_threshold) ? (int)$quiz->gaze_pitch_up_threshold : 20,
+                'gaze_pitch_down_threshold' => isset($quiz->gaze_pitch_down_threshold) ? (int)$quiz->gaze_pitch_down_threshold : 15,
+            ];
+
+            if ($existing = $DB->get_record('quizaccess_proctor', ['quizid' => $quiz->id])) {
+                $record->id = $existing->id;
+                $DB->update_record('quizaccess_proctor', $record);
+            } else {
                 $DB->insert_record('quizaccess_proctor', $record);
             }
         }
@@ -334,7 +356,10 @@ class quizaccess_proctor extends access_rule_base {
      */
     public static function get_settings_sql($quizid): array {
         return [
-            'proctor.proctor_enabled AS proctor_enabled',
+            'proctor.proctor_enabled AS proctor_enabled, ' .
+            'proctor.gaze_yaw_threshold AS gaze_yaw_threshold, ' .
+            'proctor.gaze_pitch_up_threshold AS gaze_pitch_up_threshold, ' .
+            'proctor.gaze_pitch_down_threshold AS gaze_pitch_down_threshold',
             'LEFT JOIN {quizaccess_proctor} proctor ON proctor.quizid = quiz.id',
             [],
         ];
