@@ -106,6 +106,14 @@ $string['object_detection_ready'] = 'Object detection active';
 $string['report_objects'] = 'Objects';
 $string['report_object_detections'] = 'Object detections';
 
+// Gaze thresholds settings.
+$string['gaze_yaw_threshold'] = 'Gaze Yaw Threshold (degrees)';
+$string['gaze_yaw_threshold_help'] = 'How far left or right a student can look before a gaze violation is triggered. Default is 30 degrees.';
+$string['gaze_pitch_up_threshold'] = 'Gaze Pitch Up Threshold (degrees)';
+$string['gaze_pitch_up_threshold_help'] = 'How far up a student can look before a gaze violation is triggered. Default is 20 degrees.';
+$string['gaze_pitch_down_threshold'] = 'Gaze Pitch Down Threshold (degrees)';
+$string['gaze_pitch_down_threshold_help'] = 'How far down a student can look before a gaze violation is triggered. Set slightly higher to allow looking at the keyboard. Default is 15 degrees.';
+
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';
 $string['error_model_load'] = 'Failed to load face detection models. Please refresh the page and try again.';

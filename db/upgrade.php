@@ -77,6 +77,26 @@ function xmldb_quizaccess_proctor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026081200, 'quizaccess', 'proctor');
     }
 
+    if ($oldversion < 2026081300) {
+        $table = new xmldb_table('quizaccess_proctor');
+
+        $field = new xmldb_field('gaze_yaw_threshold', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '30', 'proctor_enabled');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('gaze_pitch_up_threshold', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '20', 'gaze_yaw_threshold');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('gaze_pitch_down_threshold', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '15', 'gaze_pitch_up_threshold');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026081300, 'quizaccess', 'proctor');
+    }
+
     return true;
 }
-

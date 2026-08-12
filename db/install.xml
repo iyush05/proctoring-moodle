@@ -13,6 +13,9 @@
                        COMMENT="Foreign key to quiz.id"/>
                 <FIELD NAME="proctor_enabled" TYPE="int" LENGTH="2" NOTNULL="true" DEFAULT="0"
                        SEQUENCE="false" COMMENT="Whether proctoring is enabled for this quiz"/>
+                <FIELD NAME="gaze_yaw_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Threshold"/>
+                <FIELD NAME="gaze_pitch_up_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="20" SEQUENCE="false" COMMENT="Gaze Pitch Up Threshold"/>
+                <FIELD NAME="gaze_pitch_down_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="15" SEQUENCE="false" COMMENT="Gaze Pitch Down Threshold"/>
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
