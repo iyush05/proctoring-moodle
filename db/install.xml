@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026072400"
+<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026081602"
        COMMENT="XMLDB file for quizaccess_proctor plugin"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xsi:noNamespaceSchemaLocation="../../../../../lib/xmldb/xmldb.xsd"
@@ -13,9 +13,11 @@
                        COMMENT="Foreign key to quiz.id"/>
                 <FIELD NAME="proctor_enabled" TYPE="int" LENGTH="2" NOTNULL="true" DEFAULT="0"
                        SEQUENCE="false" COMMENT="Whether proctoring is enabled for this quiz"/>
-                <FIELD NAME="gaze_yaw_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Threshold"/>
-                <FIELD NAME="gaze_pitch_up_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="20" SEQUENCE="false" COMMENT="Gaze Pitch Up Threshold"/>
-                <FIELD NAME="gaze_pitch_down_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="15" SEQUENCE="false" COMMENT="Gaze Pitch Down Threshold"/>
+                <FIELD NAME="gaze_yaw_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Deprecated: superseded by gaze_yaw_left_threshold/gaze_yaw_right_threshold, kept for schema continuity with upgraded installs"/>
+                <FIELD NAME="gaze_pitch_up_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="20" SEQUENCE="false" COMMENT="Gaze Pitch Up Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
+                <FIELD NAME="gaze_pitch_down_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="15" SEQUENCE="false" COMMENT="Gaze Pitch Down Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
+                <FIELD NAME="gaze_yaw_left_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Left Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
+                <FIELD NAME="gaze_yaw_right_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Right Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

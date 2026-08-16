@@ -54,6 +54,21 @@ define([], function () {
     /** @type {Object} Configuration passed from the proctoring engine. */
     let config = {};
 
+    /**
+     * @type {HTMLCanvasElement|null} Offscreen canvas used to snapshot each
+     * video frame before handing it to the detector, instead of passing the
+     * <video> element directly. Some browsers (notably Safari) can silently
+     * fail to read live pixel data via WebGL directly from a <video> element
+     * sourced from a getUserMedia MediaStream — no error is thrown, the
+     * detector just keeps seeing a blank/stale frame and reports zero faces
+     * forever. Drawing to a canvas first and reading from that instead is
+     * the standard, well-established workaround. Created lazily on first use.
+     */
+    let frameCanvas = null;
+
+    /** @type {CanvasRenderingContext2D|null} 2D context for frameCanvas. */
+    let frameCanvasCtx = null;
+
     /** @type {Object} Calibration baseline to offset raw angles (Zero-baseline, from the 'center' point). */
     let calibrationBaseline = {
         yaw: 0,
@@ -665,10 +680,13 @@ define([], function () {
      * @param {Object} cfg Configuration object.
      * @param {string} cfg.faceMeshDetectorModelUrl URL to self-hosted face detector model.json.
      * @param {string} cfg.faceMeshLandmarkModelUrl URL to self-hosted attention_mesh model.json.
-     * @param {number} [cfg.gazeYawThreshold=30] Yaw threshold in degrees.
-     * @param {number} [cfg.gazePitchUpThreshold=20] Pitch-up threshold in degrees.
+     * @param {number} [cfg.gazeYawLeftThreshold=30] Yaw-left threshold in degrees.
+     *   Admin-configured CEILING — student calibration may tighten this for
+     *   their setup but never exceed it (see analyze()).
+     * @param {number} [cfg.gazeYawRightThreshold=30] Yaw-right threshold in degrees. Same ceiling semantics as gazeYawLeftThreshold.
+     * @param {number} [cfg.gazePitchUpThreshold=20] Pitch-up threshold in degrees. Same ceiling semantics as gazeYawLeftThreshold.
      * @param {number} [cfg.gazePitchDownThreshold=25] Pitch-down threshold in degrees
-     *   (more lenient than up, to allow keyboard/notes glances).
+     *   (more lenient than up, to allow keyboard/notes glances). Same ceiling semantics as gazeYawLeftThreshold.
      * @param {number} [cfg.gazePersistenceThreshold=2] Consecutive violation frames
      *   (~4s at the default 2s captureInterval).
      * @param {number} [cfg.gazeEmaAlpha=0.65] EMA smoothing factor.
@@ -740,15 +758,46 @@ define([], function () {
         }
 
         if (!videoEl || videoEl.paused || videoEl.ended || !videoEl.videoWidth) {
+            if (config.gazeDebug) {
+                console.log('[Proctor Debug] analyze() skipped — video not ready:', {
+                    hasVideoEl: !!videoEl,
+                    paused: videoEl && videoEl.paused,
+                    ended: videoEl && videoEl.ended,
+                    videoWidth: videoEl && videoEl.videoWidth,
+                    videoHeight: videoEl && videoEl.videoHeight,
+                    readyState: videoEl && videoEl.readyState
+                });
+            }
             return currentState;
         }
 
         try {
+            // Snapshot the current frame to an offscreen canvas rather than
+            // handing the <video> element to the detector directly — see the
+            // comment on frameCanvas above for why.
+            if (!frameCanvas) {
+                frameCanvas = document.createElement('canvas');
+                frameCanvasCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
+            }
+            if (frameCanvas.width !== videoEl.videoWidth || frameCanvas.height !== videoEl.videoHeight) {
+                frameCanvas.width = videoEl.videoWidth;
+                frameCanvas.height = videoEl.videoHeight;
+            }
+            frameCanvasCtx.drawImage(videoEl, 0, 0, frameCanvas.width, frameCanvas.height);
+
             // Run MediaPipe FaceMesh inference.
-            var faces = await detector.estimateFaces(videoEl, {
+            var faces = await detector.estimateFaces(frameCanvas, {
                 flipHorizontal: false,
                 staticImageMode: false
             });
+
+            if (config.gazeDebug && Math.random() < 0.3) {
+                console.log(
+                    '[Proctor Debug] estimateFaces() ->',
+                    faces ? faces.length + ' face(s)' : faces,
+                    faces && faces[0] ? { box: faces[0].box, score: faces[0].score, kp: faces[0].keypoints && faces[0].keypoints.length } : null
+                );
+            }
 
             if (!faces || faces.length === 0) {
                 // No face detected — don't count as violation, just skip.
@@ -813,14 +862,31 @@ define([], function () {
             // --- Step 5: EMA smoothing with fast-path bypass ---
             var alpha = config.gazeEmaAlpha || DEFAULT_EMA_ALPHA;
 
-            // Base thresholds: calibration-derived value takes priority over
-            // the admin-configured quiz setting, which in turn takes priority
-            // over the hardcoded default. Left/right (like up/down) are
-            // independent — see the note on calibratedThresholds above.
-            var baseYawLeftThreshold = calibratedThresholds.yawLeft || config.gazeYawThreshold || DEFAULT_YAW_THRESHOLD;
-            var baseYawRightThreshold = calibratedThresholds.yawRight || config.gazeYawThreshold || DEFAULT_YAW_THRESHOLD;
-            var basePitchUpThreshold = calibratedThresholds.pitchUp || config.gazePitchUpThreshold || DEFAULT_PITCH_UP_THRESHOLD;
-            var basePitchDownThreshold = calibratedThresholds.pitchDown || config.gazePitchDownThreshold || DEFAULT_PITCH_DOWN_THRESHOLD;
+            // Admin ceilings: the quiz-level configured value (itself either
+            // typed in directly, or captured via the admin calibration helper
+            // — see admin_calibration.js — which already bakes in a leeway
+            // margin so it isn't tight to one specific setup). The effective
+            // threshold used below is NEVER allowed past this value, no matter
+            // what the student's own calibration or live distance compensation
+            // would otherwise produce. This is what stops a student from
+            // gaming their own calibration (e.g. turning further than needed,
+            // or calibrating from an exaggerated distance) into a wide-open
+            // threshold: the ceiling is applied last, after every other
+            // adjustment, not just to the raw calibrated value.
+            var adminYawLeftCeiling = config.gazeYawLeftThreshold || DEFAULT_YAW_THRESHOLD;
+            var adminYawRightCeiling = config.gazeYawRightThreshold || DEFAULT_YAW_THRESHOLD;
+            var adminPitchUpCeiling = config.gazePitchUpThreshold || DEFAULT_PITCH_UP_THRESHOLD;
+            var adminPitchDownCeiling = config.gazePitchDownThreshold || DEFAULT_PITCH_DOWN_THRESHOLD;
+
+            // Base thresholds: the student's own calibration may refine
+            // (tighten or loosen, within reason) the admin ceiling for their
+            // specific setup; absent calibration, the ceiling is used directly.
+            // Left/right (like up/down) are independent — see the note on
+            // calibratedThresholds above.
+            var baseYawLeftThreshold = calibratedThresholds.yawLeft || adminYawLeftCeiling;
+            var baseYawRightThreshold = calibratedThresholds.yawRight || adminYawRightCeiling;
+            var basePitchUpThreshold = calibratedThresholds.pitchUp || adminPitchUpCeiling;
+            var basePitchDownThreshold = calibratedThresholds.pitchDown || adminPitchDownCeiling;
 
             // Live distance compensation: if the student is now closer/farther
             // from the camera than at calibration time, the angle required to
@@ -835,14 +901,16 @@ define([], function () {
                 distanceScale = clamp(lastEyeDistX / referenceEyeDist, DISTANCE_SCALE_MIN, DISTANCE_SCALE_MAX);
             }
 
-            var yawLeftThreshold = baseYawLeftThreshold * distanceScale;
-            var yawRightThreshold = baseYawRightThreshold * distanceScale;
+            // Final effective thresholds: distance-scaled, then re-capped at
+            // the admin ceiling as the very last step (see comment above).
+            var yawLeftThreshold = Math.min(baseYawLeftThreshold * distanceScale, adminYawLeftCeiling);
+            var yawRightThreshold = Math.min(baseYawRightThreshold * distanceScale, adminYawRightCeiling);
+            var pitchUpThreshold = Math.min(basePitchUpThreshold * distanceScale, adminPitchUpCeiling);
+            var pitchDownThreshold = Math.min(basePitchDownThreshold * distanceScale, adminPitchDownCeiling);
             // Used only where a single non-directional yaw magnitude is needed
             // (the EMA bypass gate below) — direction-specific checks further
             // down use yawLeftThreshold/yawRightThreshold directly.
             var yawThreshold = Math.min(yawLeftThreshold, yawRightThreshold);
-            var pitchUpThreshold = basePitchUpThreshold * distanceScale;
-            var pitchDownThreshold = basePitchDownThreshold * distanceScale;
 
             if (!hasSmoothedBaseline) {
                 smoothed.yaw = headYaw;
@@ -1251,6 +1319,43 @@ define([], function () {
         return summary;
     }
 
+    /**
+     * Get the personalized thresholds derived by the most recent
+     * finishCalibration() call (degrees; already includes CALIBRATION_MARGIN,
+     * already clamped — see getCalibrationBounds()). Used by the admin calibration helper
+     * (admin_calibration.js) to read out measured values for the quiz
+     * settings form; not needed for normal student-attempt operation, since
+     * analyze() reads calibratedThresholds directly.
+     *
+     * @returns {Object} { yawLeft, yawRight, pitchUp, pitchDown } — any field
+     *   may be null if that calibration point was never captured.
+     */
+    function getCalibratedThresholds() {
+        return {
+            yawLeft: calibratedThresholds.yawLeft,
+            yawRight: calibratedThresholds.yawRight,
+            pitchUp: calibratedThresholds.pitchUp,
+            pitchDown: calibratedThresholds.pitchDown
+        };
+    }
+
+    /**
+     * Get the min/max bounds calibration values are clamped to. Exposed so
+     * callers that further adjust a calibrated value (e.g. admin_calibration.js
+     * adding a leeway margin) can re-clamp to the same sane range afterward,
+     * rather than duplicating the bounds as separate magic numbers.
+     *
+     * @returns {Object} { yawMin, yawMax, pitchMin, pitchMax }
+     */
+    function getCalibrationBounds() {
+        return {
+            yawMin: CALIBRATED_YAW_MIN,
+            yawMax: CALIBRATED_YAW_MAX,
+            pitchMin: CALIBRATED_PITCH_MIN,
+            pitchMax: CALIBRATED_PITCH_MAX
+        };
+    }
+
     return {
         init: init,
         analyze: analyze,
@@ -1261,6 +1366,8 @@ define([], function () {
         formatForReport: formatForReport,
         beginCalibration: beginCalibration,
         captureCalibrationPoint: captureCalibrationPoint,
-        finishCalibration: finishCalibration
+        finishCalibration: finishCalibration,
+        getCalibratedThresholds: getCalibratedThresholds,
+        getCalibrationBounds: getCalibrationBounds
     };
 });

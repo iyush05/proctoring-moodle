@@ -715,3 +715,34 @@
     font-weight: 600;
     color: #64748b !important;
 }
+
+.proctor-calibration-cancel-btn {
+    font-size: 0.85rem !important;
+    color: #94a3b8 !important;
+    text-decoration: underline;
+    padding: 0 !important;
+}
+
+.proctor-calibration-cancel-btn:hover {
+    color: #475569 !important;
+}
+
+.proctor-calibration-preview {
+    display: flex;
+    justify-content: center;
+}
+
+/*
+ * The live video feed is temporarily reparented in here for the duration of
+ * calibration (see gaze_calibration_ui.js) — kept visibly on-screen rather
+ * than hidden behind this overlay's own backdrop, both so the student/admin
+ * can see they're correctly framed, and because some browsers can silently
+ * stop feeding real frames to WebGL/TF.js texture reads from a <video>
+ * element once it's effectively hidden behind opaque content.
+ */
+.proctor-calibration-preview-video {
+    width: 200px;
+    max-width: 100%;
+    border-radius: 8px;
+    transform: scaleX(-1); /* Mirror, matching the main proctoring preview. */
+}

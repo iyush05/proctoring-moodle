@@ -272,7 +272,15 @@ class quizaccess_proctor extends access_rule_base {
                     . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/detector/model.json',
                 'faceMeshLandmarkModelUrl' => $CFG->wwwroot
                     . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/landmark/model.json',
-                'gazeYawThreshold' => isset($this->quiz->gaze_yaw_threshold) ? (int)$this->quiz->gaze_yaw_threshold : 30,
+                // These are admin-configured CEILINGS, not fixed working values.
+                // A student's own 5-point calibration (see gaze_tracker.js) may
+                // refine — i.e. tighten — the effective threshold for their own
+                // setup, but the final value used to flag a violation never
+                // exceeds what's configured here, however the student
+                // calibrates. This is what stops a student from gaming their
+                // own calibration into a wide-open threshold.
+                'gazeYawLeftThreshold' => isset($this->quiz->gaze_yaw_left_threshold) ? (int)$this->quiz->gaze_yaw_left_threshold : 30,
+                'gazeYawRightThreshold' => isset($this->quiz->gaze_yaw_right_threshold) ? (int)$this->quiz->gaze_yaw_right_threshold : 30,
                 'gazePitchUpThreshold' => isset($this->quiz->gaze_pitch_up_threshold) ? (int)$this->quiz->gaze_pitch_up_threshold : 20,
                 'gazePitchDownThreshold' => isset($this->quiz->gaze_pitch_down_threshold) ? (int)$this->quiz->gaze_pitch_down_threshold : 25,
                 // 2 consecutive violation frames at the 2s captureInterval above
@@ -293,6 +301,8 @@ class quizaccess_proctor extends access_rule_base {
      * @param MoodleQuickForm $mform the Moodle form wrapper.
      */
     public static function add_settings_form_fields($quizform, MoodleQuickForm $mform) {
+        global $CFG, $PAGE;
+
         $mform->addElement(
             'select',
             'proctor_enabled',
@@ -305,10 +315,23 @@ class quizaccess_proctor extends access_rule_base {
         $mform->addHelpButton('proctor_enabled', 'enable_proctoring', 'quizaccess_proctor');
         $mform->setDefault('proctor_enabled', 0);
 
-        $mform->addElement('text', 'gaze_yaw_threshold', get_string('gaze_yaw_threshold', 'quizaccess_proctor'));
-        $mform->setType('gaze_yaw_threshold', PARAM_INT);
-        $mform->setDefault('gaze_yaw_threshold', 30);
-        $mform->addHelpButton('gaze_yaw_threshold', 'gaze_yaw_threshold', 'quizaccess_proctor');
+        // These four fields are CEILINGS: a student's own per-attempt 5-point
+        // calibration may tighten the effective threshold for their setup,
+        // but can never exceed what's configured here (see setup_attempt_page()
+        // and gaze_tracker.js). They can be typed in directly, or filled in by
+        // running the camera calibration helper below, which measures them the
+        // same way the student-facing calibration does and adds a leeway
+        // margin so the ceiling isn't so tight it false-positives on setups
+        // that differ from whoever ran this calibration.
+        $mform->addElement('text', 'gaze_yaw_left_threshold', get_string('gaze_yaw_left_threshold', 'quizaccess_proctor'));
+        $mform->setType('gaze_yaw_left_threshold', PARAM_INT);
+        $mform->setDefault('gaze_yaw_left_threshold', 30);
+        $mform->addHelpButton('gaze_yaw_left_threshold', 'gaze_yaw_left_threshold', 'quizaccess_proctor');
+
+        $mform->addElement('text', 'gaze_yaw_right_threshold', get_string('gaze_yaw_right_threshold', 'quizaccess_proctor'));
+        $mform->setType('gaze_yaw_right_threshold', PARAM_INT);
+        $mform->setDefault('gaze_yaw_right_threshold', 30);
+        $mform->addHelpButton('gaze_yaw_right_threshold', 'gaze_yaw_right_threshold', 'quizaccess_proctor');
 
         $mform->addElement('text', 'gaze_pitch_up_threshold', get_string('gaze_pitch_up_threshold', 'quizaccess_proctor'));
         $mform->setType('gaze_pitch_up_threshold', PARAM_INT);
@@ -319,6 +342,48 @@ class quizaccess_proctor extends access_rule_base {
         $mform->setType('gaze_pitch_down_threshold', PARAM_INT);
         $mform->setDefault('gaze_pitch_down_threshold', 25);
         $mform->addHelpButton('gaze_pitch_down_threshold', 'gaze_pitch_down_threshold', 'quizaccess_proctor');
+
+        // Camera-assisted calibration helper: runs the same 5-point
+        // calibration sequence shown to students, then fills in the four
+        // fields above (with added leeway — see admin_calibration.js) rather
+        // than requiring the admin to guess reasonable degree values.
+        $mform->addElement(
+            'static',
+            'gaze_calibration_helper',
+            get_string('gaze_calibration_helper', 'quizaccess_proctor'),
+            '<div id="proctor-admin-calibration-root">'
+                . '<button type="button" id="proctor-admin-calibration-btn" class="btn btn-secondary">'
+                . get_string('gaze_run_calibration', 'quizaccess_proctor')
+                . '</button>'
+                . '<p id="proctor-admin-calibration-status" class="text-muted small mt-1"></p>'
+                . '</div>'
+        );
+        $mform->addHelpButton('gaze_calibration_helper', 'gaze_calibration_helper', 'quizaccess_proctor');
+
+        $facemeshbase = $CFG->wwwroot . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model';
+        $PAGE->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/tf.min.js'), true);
+        $PAGE->requires->js(
+            new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/face-landmarks-detection.min.js'),
+            true
+        );
+        $PAGE->requires->js_call_amd('quizaccess_proctor/admin_calibration', 'init', [[
+            'faceMeshDetectorModelUrl' => $facemeshbase . '/detector/model.json',
+            'faceMeshLandmarkModelUrl' => $facemeshbase . '/landmark/model.json',
+            // Verbose per-frame diagnostics in the console — only the admin
+            // running their own calibration sees this, so it's left on
+            // unconditionally here (unlike the student-facing config, where
+            // it defaults off) to make troubleshooting camera/detection
+            // issues on this page tractable.
+            'gazeDebug' => true,
+            'fieldIds' => [
+                'yawLeft'   => 'id_gaze_yaw_left_threshold',
+                'yawRight'  => 'id_gaze_yaw_right_threshold',
+                'pitchUp'   => 'id_gaze_pitch_up_threshold',
+                'pitchDown' => 'id_gaze_pitch_down_threshold',
+            ],
+            'buttonId' => 'proctor-admin-calibration-btn',
+            'statusId' => 'proctor-admin-calibration-status',
+        ]]);
     }
 
     /**
@@ -335,7 +400,8 @@ class quizaccess_proctor extends access_rule_base {
             $record = (object) [
                 'quizid'                    => $quiz->id,
                 'proctor_enabled'           => 1,
-                'gaze_yaw_threshold'        => isset($quiz->gaze_yaw_threshold) ? (int)$quiz->gaze_yaw_threshold : 30,
+                'gaze_yaw_left_threshold'   => isset($quiz->gaze_yaw_left_threshold) ? (int)$quiz->gaze_yaw_left_threshold : 30,
+                'gaze_yaw_right_threshold'  => isset($quiz->gaze_yaw_right_threshold) ? (int)$quiz->gaze_yaw_right_threshold : 30,
                 'gaze_pitch_up_threshold'   => isset($quiz->gaze_pitch_up_threshold) ? (int)$quiz->gaze_pitch_up_threshold : 20,
                 'gaze_pitch_down_threshold' => isset($quiz->gaze_pitch_down_threshold) ? (int)$quiz->gaze_pitch_down_threshold : 25,
             ];
@@ -369,7 +435,8 @@ class quizaccess_proctor extends access_rule_base {
     public static function get_settings_sql($quizid): array {
         return [
             'proctor.proctor_enabled AS proctor_enabled, ' .
-            'proctor.gaze_yaw_threshold AS gaze_yaw_threshold, ' .
+            'proctor.gaze_yaw_left_threshold AS gaze_yaw_left_threshold, ' .
+            'proctor.gaze_yaw_right_threshold AS gaze_yaw_right_threshold, ' .
             'proctor.gaze_pitch_up_threshold AS gaze_pitch_up_threshold, ' .
             'proctor.gaze_pitch_down_threshold AS gaze_pitch_down_threshold',
             'LEFT JOIN {quizaccess_proctor} proctor ON proctor.quizid = quiz.id',

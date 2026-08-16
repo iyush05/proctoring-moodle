@@ -107,12 +107,17 @@ $string['report_objects'] = 'Objects';
 $string['report_object_detections'] = 'Object detections';
 
 // Gaze thresholds settings.
-$string['gaze_yaw_threshold'] = 'Gaze Yaw Threshold (degrees)';
-$string['gaze_yaw_threshold_help'] = 'How far left or right a student can look before a gaze violation is triggered. Default is 30 degrees.';
+$string['gaze_yaw_left_threshold'] = 'Gaze Yaw Left Threshold (degrees)';
+$string['gaze_yaw_left_threshold_help'] = 'How far left a student can look before a gaze violation is triggered. This is a ceiling: a student\'s own calibration at the start of their attempt may tighten this for their setup, but can never exceed it. Default is 30 degrees.';
+$string['gaze_yaw_right_threshold'] = 'Gaze Yaw Right Threshold (degrees)';
+$string['gaze_yaw_right_threshold_help'] = 'How far right a student can look before a gaze violation is triggered. This is a ceiling: a student\'s own calibration at the start of their attempt may tighten this for their setup, but can never exceed it. Default is 30 degrees.';
 $string['gaze_pitch_up_threshold'] = 'Gaze Pitch Up Threshold (degrees)';
-$string['gaze_pitch_up_threshold_help'] = 'How far up a student can look before a gaze violation is triggered. Default is 20 degrees.';
+$string['gaze_pitch_up_threshold_help'] = 'How far up a student can look before a gaze violation is triggered. This is a ceiling — see the yaw threshold help for how student calibration interacts with it. Default is 20 degrees.';
 $string['gaze_pitch_down_threshold'] = 'Gaze Pitch Down Threshold (degrees)';
-$string['gaze_pitch_down_threshold_help'] = 'How far down a student can look before a gaze violation is triggered. Set slightly higher to allow looking at the keyboard. Default is 25 degrees.';
+$string['gaze_pitch_down_threshold_help'] = 'How far down a student can look before a gaze violation is triggered. Set slightly higher to allow looking at the keyboard. This is a ceiling — see the yaw threshold help for how student calibration interacts with it. Default is 25 degrees.';
+$string['gaze_calibration_helper'] = 'Camera calibration';
+$string['gaze_calibration_helper_help'] = 'Optional: instead of guessing reasonable degree values for the four thresholds above, run this camera-based calibration once (using your own webcam) and it will fill them in for you. It measures how far you need to look to reach the edges of your screen — the same way each student is calibrated at the start of their own attempt — and adds a safety margin on top, since this becomes a ceiling shared by every student taking the quiz, not a personal setting.';
+$string['gaze_run_calibration'] = 'Run camera calibration';
 
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';
