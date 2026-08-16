@@ -18,8 +18,14 @@
  * @copyright  2026 Ayush Kannaujiya
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object_detector', 'quizaccess_proctor/gaze_tracker'],
-    function (Ajax, Notification, Str, ObjectDetector, GazeTracker) {
+define([
+    'core/ajax',
+    'core/notification',
+    'core/str',
+    'quizaccess_proctor/object_detector',
+    'quizaccess_proctor/gaze_tracker',
+    'quizaccess_proctor/gaze_calibration_ui'
+], function (Ajax, Notification, Str, ObjectDetector, GazeTracker, GazeCalibrationUI) {
 
         /** @type {Object} Configuration passed from PHP. */
         let config = {};
@@ -137,67 +143,21 @@ define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object
         }
 
         /**
-         * Run the full-screen gaze calibration sequence.
+         * Run the full-screen 5-point gaze calibration sequence. The student
+         * looks at the center then each screen edge in turn; GazeTracker
+         * derives personalized violation thresholds and a distance reference
+         * from what it measures at each point (see gaze_tracker.js). The
+         * sequence UI itself lives in gaze_calibration_ui.js, shared with the
+         * admin-facing calibration helper on the quiz settings page so both
+         * measure the same way.
          */
         async function runGazeCalibration() {
             if (!gazeTrackerReady) {
                 return;
             }
 
-            return new Promise(function (resolve) {
-                const overlay = document.createElement('div');
-                overlay.id = 'proctor-calibration-overlay';
-                overlay.className = 'proctor-calibration-overlay';
-                overlay.innerHTML = `
-                <div class="proctor-calibration-container">
-                    <h2>Gaze Tracking Calibration</h2>
-                    <p>Please sit comfortably, look directly at the red dot below, and keep your head still.</p>
-                    <div class="proctor-calibration-dot"></div>
-                    <button id="proctor-calibration-btn" class="btn btn-primary">Calibrate & Start Quiz</button>
-                    <p class="proctor-calibration-status" id="proctor-calibration-status">Initializing...</p>
-                </div>
-            `;
-                document.body.appendChild(overlay);
-
-                let isCalibrating = true;
-
-                // Run analysis loop in background so EMA settles
-                async function loop() {
-                    if (!isCalibrating) return;
-                    await GazeTracker.analyze(videoEl);
-
-                    var state = GazeTracker.getState();
-                    if (state.faceDetected) {
-                        document.getElementById('proctor-calibration-status').textContent = "Face detected. Ready to calibrate.";
-                    } else {
-                        document.getElementById('proctor-calibration-status').textContent = "No face detected. Please look at the camera.";
-                    }
-
-                    setTimeout(loop, 100);
-                }
-                loop();
-
-                const btn = document.getElementById('proctor-calibration-btn');
-                btn.addEventListener('click', function () {
-                    var state = GazeTracker.getState();
-                    if (!state.faceDetected) {
-                        alert("Please make sure your face is visible in the camera.");
-                        return;
-                    }
-
-                    btn.disabled = true;
-                    document.getElementById('proctor-calibration-status').textContent = "Calibrating...";
-
-                    // Capture current EMA values as zero-baseline
-                    GazeTracker.calibrateCenter();
-
-                    isCalibrating = false; // Stop the background loop
-
-                    setTimeout(function () {
-                        document.body.removeChild(overlay);
-                        resolve();
-                    }, 500);
-                });
+            await GazeCalibrationUI.run(GazeTracker, videoEl, {
+                completionText: 'Calibration complete! Starting quiz…'
             });
         }
 
@@ -491,7 +451,6 @@ define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object
             if (gazeTrackerReady) {
                 try {
                     let gtState = await GazeTracker.analyze(videoEl);
-                    console.log('[Proctor Debug] GazeTracker.analyze returned:', gtState);
                     gazeResult = {
                         isViolation: gtState.isViolation,
                         direction: gtState.direction,

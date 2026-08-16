@@ -98,5 +98,55 @@ function xmldb_quizaccess_proctor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026081300, 'quizaccess', 'proctor');
     }
 
+    if ($oldversion < 2026081602) {
+        // Split the single gaze_yaw_threshold into independent left/right
+        // thresholds (a shared symmetric threshold doesn't correctly represent
+        // asymmetric setups — off-center camera, a second monitor to one
+        // side, etc.). gaze_yaw_threshold is left in place (unused going
+        // forward) rather than dropped, since existing quizzes may have a
+        // deliberately-configured value and dropping it risks silent data
+        // loss for no functional benefit.
+        $table = new xmldb_table('quizaccess_proctor');
+
+        $field = new xmldb_field(
+            'gaze_yaw_left_threshold',
+            XMLDB_TYPE_INTEGER,
+            '3',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '30',
+            'gaze_yaw_threshold'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field(
+            'gaze_yaw_right_threshold',
+            XMLDB_TYPE_INTEGER,
+            '3',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '30',
+            'gaze_yaw_left_threshold'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Migrate any existing per-quiz value forward so quizzes that already
+        // had a customized yaw threshold keep the same effective behavior
+        // instead of silently reverting to the default on upgrade.
+        $DB->execute(
+            'UPDATE {quizaccess_proctor}
+                SET gaze_yaw_left_threshold = gaze_yaw_threshold,
+                    gaze_yaw_right_threshold = gaze_yaw_threshold'
+        );
+
+        upgrade_plugin_savepoint(true, 2026081602, 'quizaccess', 'proctor');
+    }
+
     return true;
 }
