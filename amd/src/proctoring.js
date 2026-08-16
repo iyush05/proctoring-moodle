@@ -137,68 +137,137 @@ define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object
         }
 
         /**
-         * Run the full-screen gaze calibration sequence.
+         * The 5 calibration points: screen center plus the 4 edges. Looking at
+         * the actual edges of the screen (not a fixed small angle) is what lets
+         * GazeTracker derive thresholds personalized to this student's screen
+         * size and distance from it, instead of one fixed angle that's only
+         * correct for one specific setup. Positions leave a small margin from
+         * the true viewport edge (dots exactly at 0%/100% are easy to clip on
+         * some displays/OS taskbars).
+         */
+        const CALIBRATION_POINTS = [
+            { id: 'center', label: 'Look at the dot in the CENTER of your screen', left: '50%', top: '50%' },
+            { id: 'right', label: 'Look at the dot on the RIGHT edge of your screen', left: '94%', top: '50%' },
+            { id: 'left', label: 'Look at the dot on the LEFT edge of your screen', left: '6%', top: '50%' },
+            { id: 'up', label: 'Look at the dot near the TOP of your screen', left: '50%', top: '10%' },
+            { id: 'down', label: 'Look at the dot near the BOTTOM of your screen', left: '50%', top: '90%' }
+        ];
+
+        /**
+         * Run the full-screen 5-point gaze calibration sequence. The student
+         * looks at the center then each screen edge in turn; GazeTracker
+         * derives personalized violation thresholds and a distance reference
+         * from what it measures at each point (see gaze_tracker.js).
          */
         async function runGazeCalibration() {
             if (!gazeTrackerReady) {
                 return;
             }
 
-            return new Promise(function (resolve) {
-                const overlay = document.createElement('div');
-                overlay.id = 'proctor-calibration-overlay';
-                overlay.className = 'proctor-calibration-overlay';
-                overlay.innerHTML = `
+            function sleep(ms) {
+                return new Promise(function (resolveSleep) {
+                    setTimeout(resolveSleep, ms);
+                });
+            }
+
+            const overlay = document.createElement('div');
+            overlay.id = 'proctor-calibration-overlay';
+            overlay.className = 'proctor-calibration-overlay';
+            overlay.innerHTML = `
                 <div class="proctor-calibration-container">
                     <h2>Gaze Tracking Calibration</h2>
-                    <p>Please sit comfortably, look directly at the red dot below, and keep your head still.</p>
-                    <div class="proctor-calibration-dot"></div>
-                    <button id="proctor-calibration-btn" class="btn btn-primary">Calibrate & Start Quiz</button>
+                    <p id="proctor-calibration-instruction">Please sit comfortably and look at the camera.</p>
+                    <button id="proctor-calibration-btn" class="btn btn-primary" disabled>Hold still…</button>
                     <p class="proctor-calibration-status" id="proctor-calibration-status">Initializing...</p>
                 </div>
+                <div class="proctor-calibration-dot" id="proctor-calibration-dot"></div>
             `;
-                document.body.appendChild(overlay);
+            document.body.appendChild(overlay);
 
-                let isCalibrating = true;
+            const btn = document.getElementById('proctor-calibration-btn');
+            const dot = document.getElementById('proctor-calibration-dot');
+            const instructionEl = document.getElementById('proctor-calibration-instruction');
+            const statusEl = document.getElementById('proctor-calibration-status');
 
-                // Run analysis loop in background so EMA settles
-                async function loop() {
-                    if (!isCalibrating) return;
+            let running = true;
+
+            // Keep GazeTracker's EMA fed throughout the whole sequence.
+            async function analyzeLoop() {
+                while (running) {
                     await GazeTracker.analyze(videoEl);
-
-                    var state = GazeTracker.getState();
-                    if (state.faceDetected) {
-                        document.getElementById('proctor-calibration-status').textContent = "Face detected. Ready to calibrate.";
-                    } else {
-                        document.getElementById('proctor-calibration-status').textContent = "No face detected. Please look at the camera.";
-                    }
-
-                    setTimeout(loop, 100);
+                    await sleep(100);
                 }
-                loop();
+            }
+            analyzeLoop();
 
-                const btn = document.getElementById('proctor-calibration-btn');
-                btn.addEventListener('click', function () {
-                    var state = GazeTracker.getState();
-                    if (!state.faceDetected) {
-                        alert("Please make sure your face is visible in the camera.");
-                        return;
-                    }
+            /**
+             * Wait until the face has been detected continuously for
+             * minFrames consecutive ~100ms polls; any dropout resets the
+             * count. Used both for the initial "ready" gate and for each
+             * calibration point's hold period, so a brief detection dropout
+             * (blink, glare) doesn't capture a garbage sample.
+             *
+             * @param {number} minFrames Consecutive stable frames required.
+             * @returns {Promise<void>}
+             */
+            async function waitForStableFace(minFrames) {
+                let count = 0;
+                while (count < minFrames) {
+                    await sleep(100);
+                    count = GazeTracker.getState().faceDetected ? count + 1 : 0;
+                }
+            }
 
-                    btn.disabled = true;
-                    document.getElementById('proctor-calibration-status').textContent = "Calibrating...";
+            // Phase 1: wait for a stable face before anything else. Calibrating
+            // (or even just starting the point sequence) before the EMA has
+            // settled bakes a skewed baseline into every subsequent reading.
+            const MIN_STABLE_FRAMES = 15; // ~1.5s
+            statusEl.textContent = 'Position yourself so your face is visible…';
+            await waitForStableFace(MIN_STABLE_FRAMES);
+            btn.disabled = false;
+            btn.textContent = 'Start Calibration';
+            statusEl.textContent = 'Face detected. Ready to calibrate.';
 
-                    // Capture current EMA values as zero-baseline
-                    GazeTracker.calibrateCenter();
-
-                    isCalibrating = false; // Stop the background loop
-
-                    setTimeout(function () {
-                        document.body.removeChild(overlay);
-                        resolve();
-                    }, 500);
-                });
+            await new Promise(function (resolveClick) {
+                btn.addEventListener('click', resolveClick, { once: true });
             });
+            btn.style.display = 'none';
+
+            GazeTracker.beginCalibration();
+
+            // Phase 2: sequence through each point — move the dot, give the
+            // student a moment to react, require a short stable hold, then
+            // capture. One retry if the face wasn't detected at capture time
+            // (e.g. mid-blink) rather than silently skipping the point.
+            const REACTION_DELAY_MS = 800;
+            const HOLD_FRAMES = 8; // ~800ms
+
+            for (var i = 0; i < CALIBRATION_POINTS.length; i++) {
+                var point = CALIBRATION_POINTS[i];
+                dot.style.left = point.left;
+                dot.style.top = point.top;
+                instructionEl.textContent = point.label;
+                statusEl.textContent = 'Move your eyes there and hold still…';
+
+                await sleep(REACTION_DELAY_MS);
+                await waitForStableFace(HOLD_FRAMES);
+
+                let captured = GazeTracker.captureCalibrationPoint(point.id);
+                if (!captured) {
+                    statusEl.textContent = 'Lost face — hold still, retrying…';
+                    await waitForStableFace(HOLD_FRAMES);
+                    captured = GazeTracker.captureCalibrationPoint(point.id);
+                }
+                statusEl.textContent = captured ? 'Captured.' : 'Skipped (no face detected).';
+            }
+
+            GazeTracker.finishCalibration();
+            instructionEl.textContent = 'Calibration complete!';
+            statusEl.textContent = 'Starting quiz…';
+            running = false;
+
+            await sleep(500);
+            document.body.removeChild(overlay);
         }
 
         /**
@@ -491,7 +560,6 @@ define(['core/ajax', 'core/notification', 'core/str', 'quizaccess_proctor/object
             if (gazeTrackerReady) {
                 try {
                     let gtState = await GazeTracker.analyze(videoEl);
-                    console.log('[Proctor Debug] GazeTracker.analyze returned:', gtState);
                     gazeResult = {
                         isViolation: gtState.isViolation,
                         direction: gtState.direction,

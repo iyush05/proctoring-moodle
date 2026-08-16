@@ -263,11 +263,23 @@ class quizaccess_proctor extends access_rule_base {
                 'objectScoreThreshold'       => 0.5,   // 50% minimum confidence.
                 'prohibitedObjects'          => ['cell phone', 'book', 'laptop'],
                 
-                // Gaze tracking config
+                // Gaze tracking config.
+                // Self-hosted MediaPipe FaceMesh model files — these were previously
+                // never passed to the JS module, so the detector silently fell back
+                // to fetching the model from Google's tfhub.dev CDN at runtime
+                // instead of running fully client-side/offline as intended.
+                'faceMeshDetectorModelUrl' => $CFG->wwwroot
+                    . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/detector/model.json',
+                'faceMeshLandmarkModelUrl' => $CFG->wwwroot
+                    . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/landmark/model.json',
                 'gazeYawThreshold' => isset($this->quiz->gaze_yaw_threshold) ? (int)$this->quiz->gaze_yaw_threshold : 30,
                 'gazePitchUpThreshold' => isset($this->quiz->gaze_pitch_up_threshold) ? (int)$this->quiz->gaze_pitch_up_threshold : 20,
-                'gazePitchDownThreshold' => isset($this->quiz->gaze_pitch_down_threshold) ? (int)$this->quiz->gaze_pitch_down_threshold : 15,
-                'gazePersistenceThreshold' => 3
+                'gazePitchDownThreshold' => isset($this->quiz->gaze_pitch_down_threshold) ? (int)$this->quiz->gaze_pitch_down_threshold : 25,
+                // 2 consecutive violation frames at the 2s captureInterval above
+                // == roughly a 4 second sustained look-away before flagging.
+                // Keep these two in sync — see the tuning note on
+                // DEFAULT_PERSISTENCE_THRESHOLD in gaze_tracker.js.
+                'gazePersistenceThreshold' => 2
             ];
 
             $page->requires->js_call_amd('quizaccess_proctor/proctoring', 'init', [$jsconfig]);
@@ -305,7 +317,7 @@ class quizaccess_proctor extends access_rule_base {
 
         $mform->addElement('text', 'gaze_pitch_down_threshold', get_string('gaze_pitch_down_threshold', 'quizaccess_proctor'));
         $mform->setType('gaze_pitch_down_threshold', PARAM_INT);
-        $mform->setDefault('gaze_pitch_down_threshold', 15);
+        $mform->setDefault('gaze_pitch_down_threshold', 25);
         $mform->addHelpButton('gaze_pitch_down_threshold', 'gaze_pitch_down_threshold', 'quizaccess_proctor');
     }
 
@@ -325,7 +337,7 @@ class quizaccess_proctor extends access_rule_base {
                 'proctor_enabled'           => 1,
                 'gaze_yaw_threshold'        => isset($quiz->gaze_yaw_threshold) ? (int)$quiz->gaze_yaw_threshold : 30,
                 'gaze_pitch_up_threshold'   => isset($quiz->gaze_pitch_up_threshold) ? (int)$quiz->gaze_pitch_up_threshold : 20,
-                'gaze_pitch_down_threshold' => isset($quiz->gaze_pitch_down_threshold) ? (int)$quiz->gaze_pitch_down_threshold : 15,
+                'gaze_pitch_down_threshold' => isset($quiz->gaze_pitch_down_threshold) ? (int)$quiz->gaze_pitch_down_threshold : 25,
             ];
 
             if ($existing = $DB->get_record('quizaccess_proctor', ['quizid' => $quiz->id])) {
