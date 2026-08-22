@@ -50,27 +50,40 @@ define([], function () {
     const FRAME_MS = 30;
 
     /**
-     * @type {number} EMA smoothing factor for the per-frame speech score.
-     * ~0.25 at 30ms frames gives a time constant around 120ms: enough to ride
-     * out a single glitchy frame (a key click, a chair creak) without adding
-     * lag that would blur the start/end of an episode.
+     * @type {number} Signal-to-noise ratio (dB over the noise floor) at which
+     * a single frame counts as "loud".
+     *
+     * Measured against a real microphone in a noisy room: ambient frames never
+     * exceeded 5.8 dB, while frames during talking reached 15 dB. Individual
+     * frames are only ever loud or not — there is deliberately no partial
+     * score, because what separates speech from silence is not how loud any
+     * one frame is but how often loud frames occur (see below).
      */
-    const SCORE_EMA_ALPHA = 0.25;
-
-    /** @type {number} Smoothed score above which a frame counts as speech. */
-    const SPEECH_SCORE_THRESHOLD = 0.5;
+    const SPEECH_SNR_DB = 6;
 
     /**
-     * @type {number} Signal-to-noise ratio (dB over the noise floor) at which
-     * a frame starts to look like speech, and the ratio at which it certainly
-     * does. Scores ramp linearly between the two rather than switching hard,
-     * so a frame hovering near the boundary contributes partially instead of
-     * flickering the classification.
+     * @type {number} Frames in the short-term activity window (~1s at 30ms).
+     *
+     * Speech is not a continuously loud signal. Between syllables the level
+     * drops all the way back to the noise floor — real measurements show
+     * roughly half of all frames during talking sitting at ambient level.
+     * Judging each frame in isolation therefore classifies normal speech as
+     * silence about half the time. What actually distinguishes talking from a
+     * quiet room is the *proportion* of loud frames over about a second:
+     * near zero when silent, around half while speaking.
      */
-    const SNR_LOW_DB = 6;
+    const ACTIVITY_WINDOW_FRAMES = 33;
 
-    /** @type {number} SNR (dB) at or above which a frame scores a full 1.0. */
-    const SNR_HIGH_DB = 12;
+    /** @type {number} Loud-frame proportion at which speech is considered to start. */
+    const ACTIVITY_ENTER_RATIO = 0.35;
+
+    /**
+     * @type {number} Loud-frame proportion below which speech is considered to
+     * have stopped. Lower than the enter ratio on purpose: without hysteresis
+     * the state would chatter on and off through every pause between words,
+     * repeatedly restarting the continuous-speech timer.
+     */
+    const ACTIVITY_EXIT_RATIO = 0.15;
 
     /**
      * @type {number} Absolute RMS floor (~-54 dBFS). In a near-silent room the
@@ -162,8 +175,14 @@ define([], function () {
     /** @type {number|null} Adaptive background level estimate (RMS). */
     let noiseFloor = null;
 
-    /** @type {number} EMA-smoothed speech score for the latest frame. */
-    let smoothedScore = 0;
+    /** @type {Array<boolean>} Recent per-frame "loud" flags for the activity window. */
+    let loudHistory = [];
+
+    /** @type {number} Proportion of the activity window that was loud. */
+    let activityRatio = 0;
+
+    /** @type {boolean} Hysteresis state: whether speech is currently present. */
+    let speechActive = false;
 
     /** @type {Array<number>} Recent frame RMS values, for the steadiness test. */
     let envelopeHistory = [];
@@ -390,25 +409,55 @@ define([], function () {
             envelopeHistory.shift();
         }
 
-        const speechScore = scoreFrame(frame);
+        // Track how much of the last second was loud, rather than judging this
+        // frame alone — see ACTIVITY_WINDOW_FRAMES for why per-frame decisions
+        // misclassify ordinary speech.
+        loudHistory.push(isLoudFrame(frame));
+        if (loudHistory.length > ACTIVITY_WINDOW_FRAMES) {
+            loudHistory.shift();
+        }
 
-        smoothedScore = (SCORE_EMA_ALPHA * speechScore) +
-            ((1 - SCORE_EMA_ALPHA) * smoothedScore);
+        let loudCount = 0;
+        for (let i = 0; i < loudHistory.length; i++) {
+            if (loudHistory[i]) {
+                loudCount++;
+            }
+        }
+        activityRatio = loudCount / loudHistory.length;
 
-        // Loud enough to be speech, and varying enough to be a person rather
-        // than a machine. Both must hold.
-        const isSpeechFrame = (smoothedScore > SPEECH_SCORE_THRESHOLD) && !isTooSteady();
+        if (speechActive) {
+            if (activityRatio < ACTIVITY_EXIT_RATIO) {
+                speechActive = false;
+            }
+        } else if (activityRatio >= ACTIVITY_ENTER_RATIO) {
+            speechActive = true;
+        }
 
-        // Track the background level, but never while speech is present —
-        // otherwise a sustained utterance is slowly absorbed into the floor
-        // and stops registering as an excess over it. Steady machinery is
-        // deliberately *not* excluded here: letting the floor rise through it
-        // is what absorbs a fan or air conditioner into the background within
-        // a few seconds of it starting, instead of leaving it permanently
-        // sitting above the floor and masking real speech on top of it.
+        // A signal this steady is machinery, not a person.
+        if (isTooSteady()) {
+            speechActive = false;
+        }
+
+        const isSpeechFrame = speechActive;
+
+        // Track the background level, but never while speech is present.
+        //
+        // This has to key off the sustained speech state, not a per-frame
+        // decision. Keying it per-frame creates a vicious circle: the quiet
+        // gaps between syllables read as "not speech", so the floor is allowed
+        // to climb toward talking level, which lowers the signal-to-noise
+        // excess, which makes still more frames read as "not speech". Measured
+        // against a real microphone the floor climbed from 0.016 to 0.023
+        // during a single stretch of talking, and detection degraded as it
+        // went.
+        //
+        // Steady machinery is deliberately not excluded here: letting the
+        // floor rise through it is what absorbs a fan or air conditioner into
+        // the background within a few seconds of it starting, instead of
+        // leaving it permanently masking real speech on top of it.
         if (rms < noiseFloor) {
             noiseFloor += (rms - noiseFloor) * NOISE_FLOOR_FALL_ALPHA;
-        } else if (!isSpeechFrame) {
+        } else if (!speechActive) {
             noiseFloor += (rms - noiseFloor) * NOISE_FLOOR_RISE_ALPHA;
         }
 
@@ -420,7 +469,8 @@ define([], function () {
                 ' floor=' + floor.toFixed(4) +
                 ' snr=' + (20 * Math.log10(rms / floor)).toFixed(1) + 'dB' +
                 ' zcr=' + frame.zcr.toFixed(2) +
-                ' score=' + smoothedScore.toFixed(2) +
+                ' loud=' + (loudHistory.length ? loudHistory[loudHistory.length - 1] : false) +
+                ' activity=' + activityRatio.toFixed(2) +
                 ' speech=' + isSpeechFrame +
                 ' steady=' + isTooSteady() +
                 ' episode=' + (episodeStart === null ? '-' : (now - episodeStart).toFixed(1) + 's') +
@@ -432,33 +482,29 @@ define([], function () {
     }
 
     /**
-     * Score one frame from 0 (certainly not speech) to 1 (certainly speech).
+     * Whether a single frame stands out above the background.
+     *
+     * Deliberately a hard yes/no. A frame in the gap between two syllables is
+     * genuinely at ambient level and there is no useful partial credit to give
+     * it; what matters is how many frames in the surrounding second are loud.
      *
      * @param {Object} frame Frame features: {rms, zcr}.
-     * @returns {number} Speech score in [0, 1].
+     * @returns {boolean} True if the frame is loud enough to be part of speech.
      */
-    function scoreFrame(frame) {
+    function isLoudFrame(frame) {
         // Too quiet to be speech in absolute terms, regardless of how it
         // compares to the noise floor.
         if (frame.rms < MIN_ABSOLUTE_RMS) {
-            return 0;
+            return false;
         }
 
         // Hiss or an impulsive click rather than a voice.
         if (frame.zcr > MAX_ZCR) {
-            return 0;
+            return false;
         }
 
         const floor = Math.max(noiseFloor, 1e-6);
-        const snrDb = 20 * Math.log10(frame.rms / floor);
-
-        if (snrDb <= SNR_LOW_DB) {
-            return 0;
-        }
-        if (snrDb >= SNR_HIGH_DB) {
-            return 1;
-        }
-        return (snrDb - SNR_LOW_DB) / (SNR_HIGH_DB - SNR_LOW_DB);
+        return (20 * Math.log10(frame.rms / floor)) > SPEECH_SNR_DB;
     }
 
     /**
@@ -478,7 +524,7 @@ define([], function () {
                 episodeScoreCount = 0;
             }
             lastSpeechTime = now;
-            episodeScoreSum += smoothedScore;
+            episodeScoreSum += activityRatio;
             episodeScoreCount++;
         } else if (episodeStart !== null && (now - lastSpeechTime) > gapToleranceSec) {
             // Silence ran past the tolerated gap: the episode ended below the
@@ -587,7 +633,7 @@ define([], function () {
     function updateState(isSpeaking, duration) {
         currentState.isSpeaking = isSpeaking;
         currentState.speechDuration = duration;
-        currentState.confidence = smoothedScore;
+        currentState.confidence = activityRatio;
     }
 
     /**
@@ -695,7 +741,9 @@ define([], function () {
         releaseAudio();
 
         noiseFloor = null;
-        smoothedScore = 0;
+        loudHistory = [];
+        activityRatio = 0;
+        speechActive = false;
         envelopeHistory = [];
         lastViolation = null;
         framesReceived = 0;
