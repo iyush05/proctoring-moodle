@@ -1356,6 +1356,85 @@ define([], function () {
         };
     }
 
+    /**
+     * Serialize everything a finished calibration produced, so it can be
+     * restored later instead of making the student sit through the 5-point
+     * sequence again. The captured points themselves are inputs and are not
+     * included — only what was derived from them.
+     *
+     * @returns {Object|null} Portable calibration state, or null if the
+     *   calibration never completed.
+     */
+    function exportCalibration() {
+        if (referenceEyeDist === null) {
+            return null;
+        }
+        return {
+            baseline: { yaw: calibrationBaseline.yaw, pitch: calibrationBaseline.pitch },
+            thresholds: {
+                yawLeft: calibratedThresholds.yawLeft,
+                yawRight: calibratedThresholds.yawRight,
+                pitchUp: calibratedThresholds.pitchUp,
+                pitchDown: calibratedThresholds.pitchDown
+            },
+            referenceEyeDist: referenceEyeDist
+        };
+    }
+
+    /**
+     * Restore a calibration produced by exportCalibration().
+     *
+     * Every value is validated and re-clamped rather than trusted, because
+     * this data may have been sitting in browser storage where a student could
+     * edit it. Note that widening the thresholds this way would not help them
+     * anyway: analyze() applies the administrator's ceiling with Math.min()
+     * every frame, after all other adjustments, so a restored value can only
+     * ever tighten the effective threshold. The clamping here is about
+     * rejecting nonsense (NaN, negatives, absurd angles), not about trust.
+     *
+     * @param {Object} data Previously exported calibration state.
+     * @returns {boolean} Whether a usable calibration was restored.
+     */
+    function importCalibration(data) {
+        if (!data || typeof data !== 'object' || !data.baseline || !data.thresholds) {
+            return false;
+        }
+
+        var dist = Number(data.referenceEyeDist);
+        var baseYaw = Number(data.baseline.yaw);
+        var basePitch = Number(data.baseline.pitch);
+
+        if (!isFinite(dist) || dist <= 0 || !isFinite(baseYaw) || !isFinite(basePitch)) {
+            return false;
+        }
+
+        /**
+         * @param {*} value Raw stored threshold.
+         * @param {number} min Lower bound.
+         * @param {number} max Upper bound.
+         * @returns {number|null} Clamped threshold, or null to fall back to config.
+         */
+        var restoreThreshold = function (value, min, max) {
+            var n = Number(value);
+            if (!isFinite(n) || n <= 0) {
+                return null;
+            }
+            return clamp(n, min, max);
+        };
+
+        calibrationBaseline.yaw = baseYaw;
+        calibrationBaseline.pitch = basePitch;
+        referenceEyeDist = dist;
+        calibratedThresholds = {
+            yawLeft: restoreThreshold(data.thresholds.yawLeft, CALIBRATED_YAW_MIN, CALIBRATED_YAW_MAX),
+            yawRight: restoreThreshold(data.thresholds.yawRight, CALIBRATED_YAW_MIN, CALIBRATED_YAW_MAX),
+            pitchUp: restoreThreshold(data.thresholds.pitchUp, CALIBRATED_PITCH_MIN, CALIBRATED_PITCH_MAX),
+            pitchDown: restoreThreshold(data.thresholds.pitchDown, CALIBRATED_PITCH_MIN, CALIBRATED_PITCH_MAX)
+        };
+
+        return true;
+    }
+
     return {
         init: init,
         analyze: analyze,
@@ -1368,6 +1447,8 @@ define([], function () {
         captureCalibrationPoint: captureCalibrationPoint,
         finishCalibration: finishCalibration,
         getCalibratedThresholds: getCalibratedThresholds,
-        getCalibrationBounds: getCalibrationBounds
+        getCalibrationBounds: getCalibrationBounds,
+        exportCalibration: exportCalibration,
+        importCalibration: importCalibration
     };
 });
