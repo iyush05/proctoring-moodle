@@ -87,11 +87,13 @@ define(['core/notification'], function (Notification) {
 
             micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    // Matches the capture settings used during the attempt —
-                    // see voice_detector.js for why AGC stays off.
+                    // Must match the capture settings used during the attempt,
+                    // or the level shown here misrepresents what the detector
+                    // will actually see. See voice_detector.js for why all
+                    // three processing features stay off.
                     autoGainControl: false,
                     noiseSuppression: false,
-                    echoCancellation: true,
+                    echoCancellation: false,
                     channelCount: 1
                 },
                 video: false
