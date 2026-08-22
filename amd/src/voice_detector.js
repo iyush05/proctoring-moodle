@@ -74,8 +74,13 @@ define([], function () {
      */
     const ACTIVITY_WINDOW_FRAMES = 33;
 
-    /** @type {number} Loud-frame proportion at which speech is considered to start. */
-    const ACTIVITY_ENTER_RATIO = 0.35;
+    /**
+     * @type {number} Loud-frame proportion at which speech is considered to
+     * start. Measured talking runs around 0.5-0.8, ambient sits at 0, so this
+     * is set well below talking density to catch quieter or less fluent
+     * speech while staying far above anything a silent room produces.
+     */
+    const ACTIVITY_ENTER_RATIO = 0.25;
 
     /**
      * @type {number} Loud-frame proportion below which speech is considered to
@@ -83,7 +88,7 @@ define([], function () {
      * the state would chatter on and off through every pause between words,
      * repeatedly restarting the continuous-speech timer.
      */
-    const ACTIVITY_EXIT_RATIO = 0.15;
+    const ACTIVITY_EXIT_RATIO = 0.10;
 
     /**
      * @type {number} Absolute RMS floor (~-54 dBFS). In a near-silent room the
@@ -175,8 +180,26 @@ define([], function () {
     /** @type {number|null} Adaptive background level estimate (RMS). */
     let noiseFloor = null;
 
-    /** @type {Array<boolean>} Recent per-frame "loud" flags for the activity window. */
+    /**
+     * @type {Array<Object>} Recent frames in the activity window, each
+     * {loud, time}. Times are kept so an episode can be backdated to when
+     * speech actually started — see pendingOnsetTime.
+     */
     let loudHistory = [];
+
+    /**
+     * @type {number|null} Audio time of the first loud frame of the current
+     * run of speech.
+     *
+     * The activity ratio cannot cross the entry threshold until speech has
+     * filled part of the window, so the state always trips a fraction of a
+     * second after talking really began. Timing an episode from that moment
+     * would mean a student had to talk noticeably longer than the configured
+     * limit before being flagged. The episode is therefore backdated to the
+     * oldest loud frame still in the window, so the limit measures actual
+     * speech rather than speech minus detection lag.
+     */
+    let pendingOnsetTime = null;
 
     /** @type {number} Proportion of the activity window that was loud. */
     let activityRatio = 0;
@@ -193,8 +216,19 @@ define([], function () {
      */
     let episodeStart = null;
 
-    /** @type {number} Audio-clock time of the most recent speech frame. */
+    /** @type {number} Audio-clock time of the most recent speech-active frame. */
     let lastSpeechTime = 0;
+
+    /**
+     * @type {number} Audio-clock time of the most recent genuinely loud frame.
+     *
+     * Episode length is measured to here rather than to the current frame.
+     * The hysteresis that holds the speech state through pauses necessarily
+     * keeps holding it for a moment after talking actually stops, and timing
+     * to the current frame would bill that trailing silence as speech —
+     * enough that seven seconds of talking could trip an eight second limit.
+     */
+    let lastLoudTime = 0;
 
     /** @type {number} Sum of smoothed scores across the current episode. */
     let episodeScoreSum = 0;
@@ -412,15 +446,24 @@ define([], function () {
         // Track how much of the last second was loud, rather than judging this
         // frame alone — see ACTIVITY_WINDOW_FRAMES for why per-frame decisions
         // misclassify ordinary speech.
-        loudHistory.push(isLoudFrame(frame));
+        const loudNow = isLoudFrame(frame);
+        if (loudNow) {
+            lastLoudTime = now;
+        }
+
+        loudHistory.push({ loud: loudNow, time: now });
         if (loudHistory.length > ACTIVITY_WINDOW_FRAMES) {
             loudHistory.shift();
         }
 
         let loudCount = 0;
+        let oldestLoudTime = null;
         for (let i = 0; i < loudHistory.length; i++) {
-            if (loudHistory[i]) {
+            if (loudHistory[i].loud) {
                 loudCount++;
+                if (oldestLoudTime === null) {
+                    oldestLoudTime = loudHistory[i].time;
+                }
             }
         }
         activityRatio = loudCount / loudHistory.length;
@@ -431,6 +474,9 @@ define([], function () {
             }
         } else if (activityRatio >= ACTIVITY_ENTER_RATIO) {
             speechActive = true;
+            // Credit the episode from where talking actually started, not from
+            // where the window finally noticed it.
+            pendingOnsetTime = oldestLoudTime;
         }
 
         // A signal this steady is machinery, not a person.
@@ -469,7 +515,7 @@ define([], function () {
                 ' floor=' + floor.toFixed(4) +
                 ' snr=' + (20 * Math.log10(rms / floor)).toFixed(1) + 'dB' +
                 ' zcr=' + frame.zcr.toFixed(2) +
-                ' loud=' + (loudHistory.length ? loudHistory[loudHistory.length - 1] : false) +
+                ' loud=' + (loudHistory.length ? loudHistory[loudHistory.length - 1].loud : false) +
                 ' activity=' + activityRatio.toFixed(2) +
                 ' speech=' + isSpeechFrame +
                 ' steady=' + isTooSteady() +
@@ -519,7 +565,12 @@ define([], function () {
 
         if (isSpeechFrame) {
             if (episodeStart === null) {
-                episodeStart = now;
+                // Backdated to the first loud frame where available, so the
+                // configured limit measures how long the student actually
+                // talked rather than how long detection took to be sure.
+                episodeStart = (pendingOnsetTime !== null) ? pendingOnsetTime : now;
+                pendingOnsetTime = null;
+        lastLoudTime = 0;
                 episodeScoreSum = 0;
                 episodeScoreCount = 0;
             }
@@ -539,7 +590,9 @@ define([], function () {
             return;
         }
 
-        const duration = now - episodeStart;
+        // Measured to the last loud frame, so the hysteresis tail and any
+        // tolerated gap are not counted as time spent talking.
+        const duration = Math.max(0, lastLoudTime - episodeStart);
 
         updateState(isSpeechFrame, duration);
 
@@ -590,7 +643,7 @@ define([], function () {
 
         lastViolation = {
             startedAt: Math.round(audioEpochOffsetMs + (episodeStart * 1000)),
-            endedAt: Math.round(audioEpochOffsetMs + (now * 1000)),
+            endedAt: Math.round(audioEpochOffsetMs + ((episodeStart + duration) * 1000)),
             duration: duration,
             confidence: avgConfidence
         };
@@ -744,6 +797,7 @@ define([], function () {
         loudHistory = [];
         activityRatio = 0;
         speechActive = false;
+        pendingOnsetTime = null;
         envelopeHistory = [];
         lastViolation = null;
         framesReceived = 0;
