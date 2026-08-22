@@ -41,6 +41,16 @@ define(['core/notification'], function (Notification) {
         // abort the camera preview.
         if (config.voiceDetectionEnabled) {
             startMicCheck();
+        } else {
+            // Logged rather than passed over silently: "no microphone prompt
+            // appeared" is otherwise indistinguishable from a broken pipeline,
+            // when the usual cause is simply that the quiz has voice detection
+            // switched off.
+            console.log(
+                '[Proctor Preflight] Voice detection is disabled for this quiz — ' +
+                'microphone not requested. Enable it in Quiz settings > ' +
+                'Extra restrictions on attempts > Enable voice detection.'
+            );
         }
 
         try {

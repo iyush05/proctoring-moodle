@@ -144,9 +144,15 @@ define([
                 if (config.voiceDetectionEnabled) {
                     updateOverlayStatus('loading', 'Starting microphone...');
                     voiceDetectorReady = await VoiceDetector.init(config, onVoiceViolation);
-                    if (!voiceDetectorReady) {
+                    if (voiceDetectorReady) {
+                        console.log('[Proctor] Voice detection active (limit: ' +
+                            config.voiceMaxContinuousSpeech + 's continuous speech)');
+                    } else {
                         console.warn('[Proctor] Voice detection unavailable — continuing without it');
                     }
+                } else {
+                    console.log('[Proctor] Voice detection is disabled for this quiz — ' +
+                        'microphone not requested.');
                 }
 
                 // Step 5: Start continuous detection.
