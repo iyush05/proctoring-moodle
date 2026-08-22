@@ -196,9 +196,71 @@ define([
                 return;
             }
 
+            // An attempt spans many page loads — every question navigation and
+            // every submit/summary screen re-runs this module. Calibrating on
+            // each one would make the student repeat the 5-point sequence
+            // continually, so a completed calibration is reused for the rest
+            // of the attempt.
+            if (GazeTracker.importCalibration(loadStoredCalibration())) {
+                console.log('[Proctor] Reusing gaze calibration from earlier in this attempt');
+                return;
+            }
+
             await GazeCalibrationUI.run(GazeTracker, videoEl, {
                 completionText: 'Calibration complete! Starting quiz…'
             });
+
+            storeCalibration(GazeTracker.exportCalibration());
+        }
+
+        /**
+         * Storage key for this attempt's calibration. Scoped to the attempt so
+         * a new attempt always calibrates afresh — the student may well have
+         * moved, or be at a different machine entirely.
+         *
+         * @returns {string} sessionStorage key.
+         */
+        function calibrationStorageKey() {
+            return 'quizaccess_proctor_gaze_cal_' + (config.attemptId || 0);
+        }
+
+        /**
+         * Read this attempt's stored calibration.
+         *
+         * sessionStorage rather than localStorage: it is scoped to the tab and
+         * cleared when the tab closes, which matches the life of an attempt and
+         * avoids one student's calibration leaking into someone else's session
+         * on a shared machine.
+         *
+         * @returns {Object|null} Stored calibration, or null if unavailable.
+         */
+        function loadStoredCalibration() {
+            try {
+                const raw = window.sessionStorage.getItem(calibrationStorageKey());
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                // Storage blocked (private browsing, site data disabled) or the
+                // stored value is corrupt. Recalibrating is the correct
+                // fallback, so this is not an error.
+                return null;
+            }
+        }
+
+        /**
+         * Persist a completed calibration for the rest of this attempt.
+         *
+         * @param {Object|null} data Calibration state from GazeTracker.
+         */
+        function storeCalibration(data) {
+            if (!data) {
+                return;
+            }
+            try {
+                window.sessionStorage.setItem(calibrationStorageKey(), JSON.stringify(data));
+            } catch (e) {
+                // Not being able to cache costs a repeated calibration, not
+                // correctness — carry on.
+            }
         }
 
         /**
