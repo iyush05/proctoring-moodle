@@ -353,6 +353,12 @@ class quizaccess_proctor extends access_rule_base {
                 // pauses between words and sentences don't keep resetting the
                 // timer to zero.
                 'voiceGapToleranceMs' => 400,
+                // Per-frame diagnostics in the console. Tied to the site's
+                // developer debugging level so it is automatically silent in
+                // production but available when tuning against a real
+                // microphone, whose signal levels vary far more between
+                // devices than any synthetic test can represent.
+                'voiceDebug' => debugging('', DEBUG_DEVELOPER),
             ];
 
             $page->requires->js_call_amd('quizaccess_proctor/proctoring', 'init', [$jsconfig]);

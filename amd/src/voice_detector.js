@@ -73,13 +73,19 @@ define([], function () {
     const SNR_HIGH_DB = 12;
 
     /**
-     * @type {number} Absolute RMS floor (~-44 dBFS). In a near-silent room the
+     * @type {number} Absolute RMS floor (~-54 dBFS). In a near-silent room the
      * noise floor estimate approaches zero, which would make the SNR ratio
      * enormous for sounds that are still objectively inaudible (breathing,
      * distant traffic). Nothing below this level is ever speech, whatever the
      * ratio says.
+     *
+     * Kept low deliberately: microphone sensitivity varies enormously between
+     * devices with gain control disabled, and a floor set for a loud headset
+     * silently ignores every word from a quiet built-in mic. Discrimination is
+     * the SNR and steadiness tests' job; this is only a backstop against
+     * amplifying digital near-silence.
      */
-    const MIN_ABSOLUTE_RMS = 0.006;
+    const MIN_ABSOLUTE_RMS = 0.003;
 
     /**
      * @type {number} Zero-crossing rate above which a frame is rejected.
@@ -141,6 +147,9 @@ define([], function () {
     /** @type {AudioWorkletNode|null} Feature-extraction worklet node. */
     let workletNode = null;
 
+    /** @type {GainNode|null} Zero-gain sink keeping the worklet in the render graph. */
+    let silentGain = null;
+
     /** @type {boolean} Whether the detector initialised successfully. */
     let ready = false;
 
@@ -183,6 +192,12 @@ define([], function () {
 
     /** @type {Object|null} The most recently confirmed violation episode. */
     let lastViolation = null;
+
+    /** @type {number} Feature frames received from the worklet. */
+    let framesReceived = 0;
+
+    /** @type {number} Audio time of the last debug line emitted. */
+    let lastDebugLog = 0;
 
     /** @type {Object} Current detection state for UI and reporting. */
     let currentState = {
@@ -272,7 +287,10 @@ define([], function () {
             sourceNode = audioContext.createMediaStreamSource(micStream);
             workletNode = new AudioWorkletNode(audioContext, 'proctor-vad-processor', {
                 numberOfInputs: 1,
-                numberOfOutputs: 0,
+                // One (silent) output purely so the node can be connected
+                // onward to the destination — see the connect() calls below.
+                numberOfOutputs: 1,
+                outputChannelCount: [1],
                 processorOptions: { frameMs: FRAME_MS }
             });
 
@@ -286,9 +304,19 @@ define([], function () {
                 }
             };
 
-            // The worklet declares no outputs, so it is not connected onward to
-            // the destination — nothing is played back to the student.
+            // The worklet must have a path to the destination or it may never
+            // run at all: the render graph is pulled from the destination
+            // backwards, so a analysis-only node left dangling off the source
+            // is not guaranteed to be processed, and process() simply never
+            // fires — no frames, no error, nothing. Routing it through a
+            // zero-gain node keeps it in the render graph while guaranteeing
+            // the student never hears their own microphone played back.
+            silentGain = audioContext.createGain();
+            silentGain.gain.value = 0;
+
             sourceNode.connect(workletNode);
+            workletNode.connect(silentGain);
+            silentGain.connect(audioContext.destination);
 
             ready = true;
             isActive = true;
@@ -315,6 +343,11 @@ define([], function () {
 
         const rms = frame.rms;
         const now = frame.time;
+
+        framesReceived++;
+        if (framesReceived === 1) {
+            window.console.log('[Proctor VoiceDetector] Receiving audio frames — analysis running');
+        }
 
         // Seed the noise floor from the first frame rather than from zero, so
         // the detector does not spend its first seconds treating the room's
@@ -348,6 +381,22 @@ define([], function () {
             noiseFloor += (rms - noiseFloor) * NOISE_FLOOR_FALL_ALPHA;
         } else if (!isSpeechFrame) {
             noiseFloor += (rms - noiseFloor) * NOISE_FLOOR_RISE_ALPHA;
+        }
+
+        if (config.voiceDebug && (now - lastDebugLog) >= 1) {
+            lastDebugLog = now;
+            const floor = Math.max(noiseFloor, 1e-6);
+            window.console.log(
+                '[Proctor Voice] rms=' + rms.toFixed(4) +
+                ' floor=' + floor.toFixed(4) +
+                ' snr=' + (20 * Math.log10(rms / floor)).toFixed(1) + 'dB' +
+                ' zcr=' + frame.zcr.toFixed(2) +
+                ' score=' + smoothedScore.toFixed(2) +
+                ' speech=' + isSpeechFrame +
+                ' steady=' + isTooSteady() +
+                ' episode=' + (episodeStart === null ? '-' : (now - episodeStart).toFixed(1) + 's') +
+                ' limit=' + config.voiceMaxContinuousSpeech + 's'
+            );
         }
 
         updateEpisode(isSpeechFrame, now);
@@ -542,6 +591,10 @@ define([], function () {
      * @returns {Object} State with isViolation, isSpeaking, speechDuration, confidence.
      */
     function getState() {
+        // framesReceived is the first thing to check when nothing is being
+        // flagged: zero means the worklet never ran and no audio was analysed
+        // at all, which is a different problem from thresholds being wrong.
+        currentState.framesReceived = framesReceived;
         return currentState;
     }
 
@@ -566,6 +619,15 @@ define([], function () {
                 // Already torn down.
             }
             workletNode = null;
+        }
+
+        if (silentGain) {
+            try {
+                silentGain.disconnect();
+            } catch (e) {
+                // Already disconnected.
+            }
+            silentGain = null;
         }
 
         if (sourceNode) {
@@ -607,6 +669,8 @@ define([], function () {
         smoothedScore = 0;
         envelopeHistory = [];
         lastViolation = null;
+        framesReceived = 0;
+        lastDebugLog = 0;
         resetEpisode();
 
         currentState = {

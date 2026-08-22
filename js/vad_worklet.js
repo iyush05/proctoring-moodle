@@ -74,6 +74,12 @@ class ProctorVadProcessor extends AudioWorkletProcessor {
     /**
      * Accumulate incoming audio into fixed-size frames.
      *
+     * The node declares one output so it can be connected onward to the
+     * destination, which is what keeps it in the render graph — see the
+     * connect() calls in voice_detector.js. Nothing is ever written to that
+     * output, so it stays silent, and a zero-gain node downstream makes that
+     * doubly certain.
+     *
      * @param {Array<Array<Float32Array>>} inputs Input channel data.
      * @returns {boolean} False to tear the processor down, true to keep it alive.
      */
