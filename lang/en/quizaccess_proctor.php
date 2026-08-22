@@ -145,7 +145,6 @@ $string['filter_type_gaze'] = 'Gaze';
 $string['filter_type_object'] = 'Object';
 $string['filter_type_voice'] = 'Voice';
 $string['filter_type_other'] = 'Other';
-$string['filter_count_showing'] = 'Showing {$a->shown} of {$a->total} flags';
 $string['review_pending'] = 'Pending';
 $string['review_confirmed'] = 'Confirmed';
 $string['review_dismissed'] = 'Dismissed';
@@ -154,8 +153,13 @@ $string['action_confirm'] = 'Confirm';
 $string['action_dismiss'] = 'Dismiss';
 $string['action_undo'] = 'Undo';
 $string['elapsed_since_start'] = 'Elapsed time since attempt start';
-$string['flags_truncated'] = 'Showing the {$a->shown} most recent flags of {$a->total} total for this student.';
 $string['mark_review_error'] = 'Could not update the review status — please try again.';
+$string['pagination_prev'] = 'Previous';
+$string['pagination_next'] = 'Next';
+$string['pagination_page_info'] = 'Page {$a->page} of {$a->totalpages} ({$a->total} flags)';
+$string['flags_loading'] = 'Loading flags…';
+$string['flags_none_match_filter'] = 'No flags match the current filter.';
+$string['flags_load_error'] = 'Could not load flags — please try again.';
 
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';

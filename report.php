@@ -18,11 +18,13 @@
  * Proctoring report page for teachers.
  *
  * Students are listed first, each collapsed to a one-line summary; clicking
- * a student expands their individual flags. Each flag can be marked
- * confirmed or dismissed, and a filter bar narrows the list by review status
- * or detection type. All of this runs client-side against the page's own
- * data (amd/src/report.js) rather than reloading, since a quiz's flags for
- * one report view are already capped at 500 rows.
+ * a student expands their individual flags, fetched on demand and paginated
+ * (amd/src/report.js, classes/external/get_student_flags.php) rather than
+ * rendered inline here — a quiz's total flag count is unbounded, and this
+ * page only ever needs to render the student list itself plus whichever one
+ * or two panels a teacher currently has open. A filter bar narrows each
+ * open panel by review status or detection type, re-fetching that panel's
+ * current page through the same endpoint.
  *
  * @package    quizaccess_proctor
  * @copyright  2026 Ayush Kannaujiya
@@ -30,6 +32,7 @@
  */
 
 require_once(__DIR__ . '/../../../../config.php');
+require_once(__DIR__ . '/lib.php');
 
 $cmid     = required_param('cmid', PARAM_INT);
 $courseid = required_param('courseid', PARAM_INT);
@@ -55,30 +58,6 @@ $PAGE->set_title(get_string('report_title', 'quizaccess_proctor'));
 $PAGE->set_heading($course->fullname);
 $PAGE->set_context($context);
 
-/**
- * Map a detection status onto one of the report's filterable type buckets.
- *
- * @param string $status Raw log status (e.g. 'looking_away').
- * @return string One of 'face', 'gaze', 'object', 'voice', 'other'.
- */
-function quizaccess_proctor_flag_type(string $status): string {
-    switch ($status) {
-        case 'match':
-        case 'mismatch':
-        case 'no_face':
-        case 'multiple_faces':
-            return 'face';
-        case 'looking_away':
-            return 'gaze';
-        case 'phone_detected':
-            return 'object';
-        case 'talking_detected':
-            return 'voice';
-        default:
-            return 'other';
-    }
-}
-
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('report_title', 'quizaccess_proctor') . ': ' . $quiz->name);
 
@@ -89,20 +68,6 @@ if ($userid) {
     $userwhere = ' AND l.userid = :userid';
     $params['userid'] = $userid;
 }
-
-/**
- * @var int Most flag rows fetched per student for the expandable detail
- * panel. A flat "most recent 500 flags overall" cap — what this report used
- * before being restructured — silently drops entire students from the page
- * once a single prolific one fills the cap with recent activity: verified
- * against real data where one student's 875 flags left a second student's
- * 61 completely invisible, with nothing on the page indicating a student had
- * been left out. Capping per student instead means every student who has
- * any flag is guaranteed to appear (see the aggregate query below, which is
- * unbounded), and a notice is shown if that student's own history was
- * truncated (see the flag-list rendering below).
- */
-const REPORT_MAX_FLAGS_PER_STUDENT = 200;
 
 // Phase 1: an unbounded per-student aggregate. This alone decides which
 // students appear on the page, so it must never be capped — counts and last-
@@ -169,7 +134,6 @@ if ($aggregates) {
         }
         $byuser[$uid] = (object) [
             'user'      => $students[$uid],
-            'logs'      => [],
             'total'     => (int) $agg->total,
             'confirmed' => (int) $agg->confirmed,
             'dismissed' => (int) $agg->dismissed,
@@ -187,27 +151,11 @@ uasort($byuser, function ($a, $b) {
     return strcasecmp(fullname($a->user), fullname($b->user));
 });
 
-// Phase 3: fetch each student's own flag detail rows, most recent first,
-// capped per student rather than globally (see REPORT_MAX_FLAGS_PER_STUDENT
-// above). One query per student rather than a single windowed query,
-// because the number of students on one quiz's report is bounded by class
-// size — the thing that was NOT safe to leave unbounded was the query in
-// phase 1 that decides which students appear at all.
-foreach ($byuser as $uid => $group) {
-    $detailsql = "SELECT l.*, ru.firstname AS reviewer_firstname, ru.lastname AS reviewer_lastname,
-                         qa.timestart AS attempt_timestart, qa.attempt AS attempt_number
-                  FROM {quizaccess_proctor_logs} l
-                  LEFT JOIN {user} ru ON ru.id = l.reviewed_by
-                  LEFT JOIN {quiz_attempts} qa ON qa.id = l.attemptid
-                  WHERE l.quizid = :quizid AND l.status != 'active' AND l.userid = :studentid
-                  ORDER BY l.timecreated DESC";
-    $byuser[$uid]->logs = array_values($DB->get_records_sql(
-        $detailsql,
-        ['quizid' => $quiz->id, 'studentid' => $uid],
-        0,
-        REPORT_MAX_FLAGS_PER_STUDENT
-    ));
-}
+// Flag detail rows are deliberately not fetched here at all — each
+// student's flags are loaded through quizaccess_proctor_get_student_flags
+// on demand (first expand, page change, or filter change), rendered via the
+// same quizaccess_proctor_render_flag_card() this page would otherwise call
+// inline. See lib.php.
 
 // Display summary cards.
 echo '<div class="proctor-report-container">';
@@ -264,33 +212,12 @@ echo '<option value="other">' . get_string('filter_type_other', 'quizaccess_proc
 echo '</select>';
 echo '</div>';
 
-echo '<span id="proctor-filter-count" class="proctor-filter-count"></span>';
 echo '</div>'; // End filter bar.
 
 // Student list.
 if (empty($byuser)) {
     echo '<div class="alert alert-info">' . get_string('report_no_logs', 'quizaccess_proctor') . '</div>';
 } else {
-    $statusmap = [
-        'match'          => ['class' => 'proctor-badge-match',     'label' => get_string('status_match', 'quizaccess_proctor')],
-        'mismatch'       => ['class' => 'proctor-badge-mismatch',  'label' => get_string('status_mismatch', 'quizaccess_proctor')],
-        'no_face'        => ['class' => 'proctor-badge-noface',    'label' => get_string('status_noface', 'quizaccess_proctor')],
-        'multiple_faces' => ['class' => 'proctor-badge-multiface', 'label' => get_string('status_multiface', 'quizaccess_proctor')],
-        'phone_detected' => ['class' => 'proctor-badge-phone',     'label' => get_string('status_phone', 'quizaccess_proctor')],
-        'looking_away'   => ['class' => 'proctor-badge-gaze',      'label' => get_string('snapshotstatus_looking_away', 'quizaccess_proctor')],
-        'talking_detected' => ['class' => 'proctor-badge-talking', 'label' => get_string('snapshotstatus_talking_detected', 'quizaccess_proctor')],
-        'error'          => ['class' => 'proctor-badge-error',     'label' => get_string('status_error', 'quizaccess_proctor')],
-        'active'         => ['class' => 'proctor-badge-active',    'label' => get_string('status_active', 'quizaccess_proctor')],
-    ];
-
-    $objecticons = [
-        'cell phone' => '📱',
-        'book'       => '📖',
-        'laptop'     => '💻',
-        'remote'     => '🎮',
-        'tv'         => '📺',
-    ];
-
     echo '<div class="proctor-student-list" id="proctor-student-list">';
 
     foreach ($byuser as $group) {
@@ -322,111 +249,21 @@ if (empty($byuser)) {
         echo '<span class="proctor-student-lastseen">' . userdate($group->lasttime, '%d %b, %H:%M') . '</span>';
         echo '</div>'; // End header.
 
-        echo '<div class="proctor-student-flags" style="display:none;">';
-
-        if ($group->total > count($group->logs)) {
-            echo '<div class="proctor-truncation-notice">' . get_string(
-                'flags_truncated',
-                'quizaccess_proctor',
-                (object) ['shown' => count($group->logs), 'total' => $group->total]
-            ) . '</div>';
-        }
-
-        foreach ($group->logs as $log) {
-            $type = quizaccess_proctor_flag_type($log->status);
-            $reviewstatus = $log->review_status ?: 'pending';
-            $badge = $statusmap[$log->status] ?? $statusmap['error'];
-
-            echo '<div class="proctor-flag-card" data-logid="' . $log->id . '" data-type="' . $type
-                . '" data-review="' . $reviewstatus . '">';
-
-            echo '<div class="proctor-flag-main">';
-            echo '<span class="proctor-badge ' . $badge['class'] . '">' . $badge['label'] . '</span>';
-
-            $servertimestr = userdate($log->timecreated, '%d %b %Y, %H:%M:%S');
-            echo '<span class="proctor-flag-time" data-timestamp="' . $log->timecreated . '" title="'
-                . s($servertimestr) . '">' . s($servertimestr) . '</span>';
-
-            if (!empty($log->attempt_timestart) && $log->timecreated >= $log->attempt_timestart) {
-                $elapsed = $log->timecreated - $log->attempt_timestart;
-                $elapsedstr = sprintf('+%02d:%02d', floor($elapsed / 60), $elapsed % 60);
-                echo '<span class="proctor-badge-elapsed" title="' . get_string('elapsed_since_start', 'quizaccess_proctor') . '">'
-                    . s($elapsedstr) . '</span>';
-            }
-
-            $attemptlabel = !empty($log->attempt_number) ? get_string('attempt', 'quiz', $log->attempt_number) : '#' . $log->attemptid;
-            $attempturl = new moodle_url('/mod/quiz/review.php', ['attempt' => $log->attemptid]);
-            echo '<a href="' . $attempturl . '" target="_blank" class="proctor-flag-attempt-link">' . s($attemptlabel) . '</a>';
-
-            if ($log->confidence > 0) {
-                $percent = round((1 - $log->confidence) * 100, 1);
-                echo '<span class="proctor-flag-detail">' . $percent . '% (d=' . round($log->confidence, 3) . ')</span>';
-            }
-
-            if (!empty($log->objects_detected)) {
-                foreach (explode(',', $log->objects_detected) as $obj) {
-                    $obj = trim($obj);
-                    if ($obj === '') {
-                        continue;
-                    }
-                    $icon = $objecticons[$obj] ?? '⚠';
-                    echo '<span class="proctor-object-pill"><span class="proctor-pill-icon">' . $icon . '</span>'
-                        . s(ucfirst($obj)) . '</span>';
-                }
-            }
-
-            if (!empty($log->gaze_data)) {
-                $gaze = explode(',', $log->gaze_data);
-                if (count($gaze) >= 3) {
-                    $dir = get_string('direction_' . trim($gaze[0]), 'quizaccess_proctor');
-                    $gazeobj = (object) ['direction' => $dir, 'yaw' => trim($gaze[1]), 'pitch' => trim($gaze[2])];
-                    echo '<span class="proctor-flag-detail">' . get_string('gaze_data_log', 'quizaccess_proctor', $gazeobj) . '</span>';
-                }
-            }
-
-            if (!empty($log->voice_data)) {
-                $voice = explode(',', $log->voice_data);
-                if (count($voice) >= 3) {
-                    $voiceobj = (object) [
-                        'duration'   => format_float((float) trim($voice[1]), 1),
-                        'confidence' => format_float((float) trim($voice[2]), 2),
-                    ];
-                    echo '<span class="proctor-flag-detail">' . get_string('voice_data_log', 'quizaccess_proctor', $voiceobj) . '</span>';
-                }
-            }
-
-            if (!empty($log->image_data)) {
-                echo '<img src="' . s($log->image_data) . '" class="proctor-snapshot-thumb" alt="Snapshot" '
-                    . 'onclick="window.proctorOpenModal && window.proctorOpenModal(this.src)" />';
-            }
-
-            echo '</div>'; // End proctor-flag-main.
-
-            echo '<div class="proctor-flag-review" data-review-panel>';
-
-            $reviewerlabel = '';
-            if ($reviewstatus !== 'pending' && !empty($log->reviewer_firstname)) {
-                $reviewer = fullname((object) [
-                    'firstname' => $log->reviewer_firstname, 'lastname' => $log->reviewer_lastname,
-                ]);
-                $reviewerlabel = get_string('reviewed_by_at', 'quizaccess_proctor', (object) [
-                    'name' => $reviewer,
-                    'time' => userdate($log->reviewed_at, '%d %b, %H:%M'),
-                ]);
-            }
-
-            echo '<span class="proctor-review-label" data-review-label>' . s($reviewerlabel) . '</span>';
-            echo '<button type="button" class="btn btn-sm btn-outline-success proctor-btn-confirm" data-action="confirmed">'
-                . get_string('action_confirm', 'quizaccess_proctor') . '</button>';
-            echo '<button type="button" class="btn btn-sm btn-outline-secondary proctor-btn-dismiss" data-action="dismissed">'
-                . get_string('action_dismiss', 'quizaccess_proctor') . '</button>';
-            echo '<button type="button" class="btn btn-sm btn-link proctor-btn-undo" data-action="pending">'
-                . get_string('action_undo', 'quizaccess_proctor') . '</button>';
-
-            echo '</div>'; // End proctor-flag-review.
-            echo '</div>'; // End proctor-flag-card.
-        }
-
+        // Empty until expanded: amd/src/report.js fetches this student's
+        // first page through quizaccess_proctor_get_student_flags and
+        // injects the returned HTML (built by the same
+        // quizaccess_proctor_render_flag_card() this page would otherwise
+        // call here) into .proctor-flags-container. Re-fetched on page
+        // change or filter change while the panel is open.
+        echo '<div class="proctor-student-flags" style="display:none;" data-loaded="0">';
+        echo '<div class="proctor-flags-container"></div>';
+        echo '<div class="proctor-pagination" style="display:none;">';
+        echo '<button type="button" class="btn btn-sm btn-outline-secondary proctor-page-prev">'
+            . get_string('pagination_prev', 'quizaccess_proctor') . '</button>';
+        echo '<span class="proctor-page-info"></span>';
+        echo '<button type="button" class="btn btn-sm btn-outline-secondary proctor-page-next">'
+            . get_string('pagination_next', 'quizaccess_proctor') . '</button>';
+        echo '</div>';
         echo '</div>'; // End proctor-student-flags.
         echo '</div>'; // End proctor-student-group.
     }

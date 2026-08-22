@@ -938,13 +938,38 @@
     background: #fbfcfd;
 }
 
-.proctor-truncation-notice {
-    font-size: 0.78rem;
+.proctor-flags-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+}
+
+.proctor-flags-message {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    padding: 0.6rem 0.2rem;
+    text-align: center;
+}
+
+.proctor-flags-message.proctor-flags-error {
     color: #e65100;
-    background: rgba(255, 145, 0, 0.1);
-    border: 1px solid rgba(255, 145, 0, 0.3);
-    border-radius: 6px;
-    padding: 0.45rem 0.7rem;
+}
+
+.proctor-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.9rem;
+    padding-top: 0.6rem;
+    margin-top: 0.3rem;
+    border-top: 1px solid #eceff1;
+}
+
+.proctor-page-info {
+    font-size: 0.8rem;
+    color: #64748b;
+    white-space: nowrap;
 }
 
 .proctor-flag-card {

@@ -1,12 +1,17 @@
 /**
- * Teacher report page — student grouping, filtering, and the flag review
- * workflow (confirm / dismiss / undo).
+ * Teacher report page — student list, lazy-loaded paginated flags, and the
+ * flag review workflow (confirm / dismiss / undo).
  *
- * Everything here operates on data already in the page. The report caps at
- * 500 log rows per view (see report.php), so filtering and expand/collapse
- * are done by toggling visibility in the existing DOM rather than reloading
- * or re-querying — the only network call this module makes is the one that
- * actually changes data, marking a flag's review status.
+ * The page itself only ever renders the student list (name, avatar,
+ * aggregate counts) — no flag detail rows. A student's flags are fetched
+ * through quizaccess_proctor_get_student_flags on first expand, on
+ * pagination, and on filter change, and the returned HTML (built server-side
+ * by the same renderer the page would otherwise call inline — see lib.php)
+ * is injected into that student's panel. This keeps the initial page load
+ * small regardless of how many flags a quiz has accumulated, and is why
+ * review-action buttons and pagination controls are wired up via delegated
+ * listeners on a stable ancestor rather than bound at init time: most of the
+ * DOM they act on does not exist yet when the page loads.
  *
  * @module     quizaccess_proctor/report
  * @package    quizaccess_proctor
@@ -27,14 +32,29 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
         config = cfg || {};
 
         initStudentToggles();
-        initFilters();
-        initReviewActions();
+        initFilterControls();
+        initDelegatedActions();
         initModal();
-        localizeTimestamps();
     }
 
     /**
-     * Wire up expand/collapse for each student's header row.
+     * The review-status/type filter pair currently selected, as a single
+     * string — used both as the value sent to the server and as a cheap way
+     * to tell whether a panel's cached page was loaded under a filter that
+     * no longer applies.
+     *
+     * @returns {{reviewstatus: string, type: string, key: string}}
+     */
+    function currentFilter() {
+        const reviewstatus = document.getElementById('proctor-filter-review').value;
+        const type = document.getElementById('proctor-filter-type').value;
+        return { reviewstatus: reviewstatus, type: type, key: reviewstatus + '|' + type };
+    }
+
+    /**
+     * Wire up expand/collapse for each student's header row. Expanding loads
+     * that student's first page if it has never been loaded, or if it was
+     * loaded under a filter selection that has since changed.
      */
     function initStudentToggles() {
         document.querySelectorAll('.proctor-student-header').forEach(function (header) {
@@ -48,6 +68,11 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
                 flags.style.display = expanded ? 'none' : 'block';
                 if (icon) {
                     icon.innerHTML = expanded ? '&#9656;' : '&#9662;';
+                }
+
+                const filter = currentFilter();
+                if (!expanded && (flags.dataset.loaded !== '1' || flags.dataset.filterkey !== filter.key)) {
+                    loadPage(group, 0);
                 }
             };
 
@@ -63,8 +88,13 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
 
     /**
      * Wire up the review-status and detection-type filter selects.
+     *
+     * A filter change immediately reloads any panel that is currently
+     * expanded (from page 0, under the new filter) and marks every other
+     * panel stale so it reloads the next time it is expanded, rather than
+     * eagerly re-fetching panels nobody is looking at.
      */
-    function initFilters() {
+    function initFilterControls() {
         const reviewSelect = document.getElementById('proctor-filter-review');
         const typeSelect = document.getElementById('proctor-filter-type');
 
@@ -72,79 +102,159 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
             return;
         }
 
-        reviewSelect.addEventListener('change', applyFilters);
-        typeSelect.addEventListener('change', applyFilters);
-
-        applyFilters();
-    }
-
-    /**
-     * Show/hide flag cards according to the current filter selection, hide
-     * any student group left with nothing visible, and update the count.
-     */
-    function applyFilters() {
-        const reviewFilter = document.getElementById('proctor-filter-review').value;
-        const typeFilter = document.getElementById('proctor-filter-type').value;
-
-        let totalFlags = 0;
-        let shownFlags = 0;
-
-        document.querySelectorAll('.proctor-student-group').forEach(function (group) {
-            let visibleInGroup = 0;
-
-            group.querySelectorAll('.proctor-flag-card').forEach(function (card) {
-                totalFlags++;
-
-                const reviewOk = (reviewFilter === 'all') || (card.dataset.review === reviewFilter);
-                const typeOk = (typeFilter === 'all') || (card.dataset.type === typeFilter);
-                const visible = reviewOk && typeOk;
-
-                card.style.display = visible ? '' : 'none';
-                if (visible) {
-                    visibleInGroup++;
-                    shownFlags++;
+        const onChange = function () {
+            document.querySelectorAll('.proctor-student-group').forEach(function (group) {
+                const header = group.querySelector('.proctor-student-header');
+                const flags = group.querySelector('.proctor-student-flags');
+                if (header.getAttribute('aria-expanded') === 'true') {
+                    loadPage(group, 0);
+                } else {
+                    flags.dataset.loaded = '0';
                 }
             });
+        };
 
-            group.style.display = (visibleInGroup > 0) ? '' : 'none';
-        });
-
-        const countEl = document.getElementById('proctor-filter-count');
-        if (countEl) {
-            Str.get_string('filter_count_showing', 'quizaccess_proctor', { shown: shownFlags, total: totalFlags })
-                .then(function (str) {
-                    countEl.textContent = str;
-                    return null;
-                })
-                .catch(Notification.exception);
-        }
+        reviewSelect.addEventListener('change', onChange);
+        typeSelect.addEventListener('change', onChange);
     }
 
     /**
-     * Wire up the confirm/dismiss/undo buttons on every flag card.
+     * Fetch and render one page of one student's flags.
+     *
+     * @param {HTMLElement} group The .proctor-student-group element.
+     * @param {number} page Zero-based page number to load.
      */
-    function initReviewActions() {
-        document.querySelectorAll('.proctor-flag-card').forEach(function (card) {
-            card.querySelectorAll('[data-action]').forEach(function (btn) {
-                btn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    markLog(card, btn.dataset.action, btn);
-                });
-            });
+    function loadPage(group, page) {
+        const userid = parseInt(group.dataset.userid, 10);
+        const flags = group.querySelector('.proctor-student-flags');
+        const container = flags.querySelector('.proctor-flags-container');
+        const pagination = flags.querySelector('.proctor-pagination');
+        const filter = currentFilter();
+
+        pagination.style.display = 'none';
+        setMessage(container, 'flags_loading', false);
+
+        Ajax.call([{
+            methodname: 'quizaccess_proctor_get_student_flags',
+            args: {
+                cmid: config.cmid,
+                userid: userid,
+                page: page,
+                reviewstatus: filter.reviewstatus,
+                type: filter.type,
+            }
+        }])[0].then(function (result) {
+            flags.dataset.loaded = '1';
+            flags.dataset.filterkey = filter.key;
+            flags.dataset.page = String(result.page);
+            flags.dataset.totalpages = String(result.totalpages);
+
+            if (result.total === 0) {
+                setMessage(container, 'flags_none_match_filter', false);
+            } else {
+                container.innerHTML = result.html;
+                localizeTimestamps(container);
+            }
+
+            updatePaginationControls(flags, result.page, result.totalpages, result.total);
+            return null;
+        }).catch(function (err) {
+            setMessage(container, 'flags_load_error', true);
+            Notification.exception(err);
         });
     }
 
     /**
-     * Send a review-status update for one flag and reflect the result in the
-     * DOM once the server confirms it — the card is not updated optimistically,
-     * since a stale count on the student header would be worse than a brief
-     * delay on a low-frequency action like this.
+     * Show a single centred message in a flags container, replacing any
+     * cards currently in it — used for the loading, empty, and error states.
+     *
+     * @param {HTMLElement} container The .proctor-flags-container element.
+     * @param {string} stringKey Language string identifier.
+     * @param {boolean} isError Whether to style this as an error.
+     */
+    function setMessage(container, stringKey, isError) {
+        Str.get_string(stringKey, 'quizaccess_proctor').then(function (str) {
+            container.innerHTML = '<div class="proctor-flags-message' + (isError ? ' proctor-flags-error' : '') + '">'
+                + str.replace(/[<>&]/g, function (c) {
+                    return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
+                })
+                + '</div>';
+            return null;
+        }).catch(Notification.exception);
+    }
+
+    /**
+     * Show/hide and label the Prev/Next controls for the page just loaded.
+     *
+     * @param {HTMLElement} flags The .proctor-student-flags element.
+     * @param {number} page Zero-based page now showing.
+     * @param {number} totalpages Total pages available under the current filter.
+     * @param {number} total Total flags matching the current filter.
+     */
+    function updatePaginationControls(flags, page, totalpages, total) {
+        const pagination = flags.querySelector('.proctor-pagination');
+        const info = pagination.querySelector('.proctor-page-info');
+        const prevBtn = pagination.querySelector('.proctor-page-prev');
+        const nextBtn = pagination.querySelector('.proctor-page-next');
+
+        pagination.style.display = (totalpages > 1) ? 'flex' : 'none';
+        prevBtn.disabled = (page <= 0);
+        nextBtn.disabled = (page >= totalpages - 1);
+
+        Str.get_string('pagination_page_info', 'quizaccess_proctor', {
+            page: page + 1, totalpages: totalpages, total: total
+        }).then(function (str) {
+            info.textContent = str;
+            return null;
+        }).catch(Notification.exception);
+    }
+
+    /**
+     * Delegated click handling for pagination and review-action buttons.
+     * Delegated, rather than bound per-button at init time, because both
+     * kinds of button live inside content injected long after page load.
+     */
+    function initDelegatedActions() {
+        const list = document.getElementById('proctor-student-list');
+        if (!list) {
+            return;
+        }
+
+        list.addEventListener('click', function (e) {
+            const pageBtn = e.target.closest('.proctor-page-prev, .proctor-page-next');
+            if (pageBtn) {
+                if (pageBtn.disabled) {
+                    return;
+                }
+                const group = pageBtn.closest('.proctor-student-group');
+                const flags = group.querySelector('.proctor-student-flags');
+                const current = parseInt(flags.dataset.page || '0', 10);
+                const delta = pageBtn.classList.contains('proctor-page-next') ? 1 : -1;
+                loadPage(group, current + delta);
+                return;
+            }
+
+            const actionBtn = e.target.closest('[data-action]');
+            if (actionBtn) {
+                e.stopPropagation();
+                const card = actionBtn.closest('.proctor-flag-card');
+                markLog(card, actionBtn.dataset.action);
+            }
+        });
+    }
+
+    /**
+     * Send a review-status update for one flag. On success, update that
+     * student's header counts and reload the panel's current page — rather
+     * than patching the single card in place — since marking a flag can
+     * change which page it belongs to under the active filter (it may no
+     * longer match at all), and reloading is simpler and more reliably
+     * correct than trying to replicate that logic in the client.
      *
      * @param {HTMLElement} card The .proctor-flag-card element.
      * @param {string} status 'confirmed', 'dismissed', or 'pending'.
-     * @param {HTMLElement} btn The button that was clicked, disabled while in flight.
      */
-    function markLog(card, status, btn) {
+    function markLog(card, status) {
         const logId = parseInt(card.dataset.logid, 10);
         const previousStatus = card.dataset.review;
 
@@ -152,6 +262,8 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
             return;
         }
 
+        const group = card.closest('.proctor-student-group');
+        const flags = group.querySelector('.proctor-student-flags');
         card.querySelectorAll('[data-action]').forEach(function (b) {
             b.disabled = true;
         });
@@ -164,21 +276,11 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
                 status: status,
             }
         }])[0].then(function (result) {
-            card.dataset.review = result.status;
-
-            const label = card.querySelector('[data-review-label]');
-            if (label) {
-                label.textContent = (result.status !== 'pending' && result.reviewedby)
-                    ? result.reviewedby + ', ' + new Date(result.reviewedat * 1000).toLocaleString()
-                    : '';
-            }
-
-            updateGroupCounts(card.closest('.proctor-student-group'), previousStatus, result.status);
-            applyFilters();
+            updateGroupCounts(group, previousStatus, result.status);
+            loadPage(group, parseInt(flags.dataset.page || '0', 10));
             return null;
         }).catch(function (err) {
             Notification.exception(err);
-        }).finally(function () {
             card.querySelectorAll('[data-action]').forEach(function (b) {
                 b.disabled = false;
             });
@@ -227,10 +329,11 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
 
         /**
          * Open the lightbox with the given image source. Exposed on window
-         * because snapshot thumbnails are rendered as plain server-side HTML
-         * (report.php) with an inline onclick, the same pattern the previous
-         * version of this page used — there is no per-thumbnail JS handle to
-         * attach a listener to otherwise.
+         * because snapshot thumbnails arrive as server-rendered HTML
+         * (lib.php's quizaccess_proctor_render_flag_card()) with an inline
+         * onclick — there is no per-thumbnail JS handle to attach a listener
+         * to otherwise, and that HTML is injected long after this module's
+         * own init() runs.
          *
          * @param {string} src Image data URL.
          */
@@ -261,12 +364,16 @@ define(['core/ajax', 'core/str', 'core/notification'], function (Ajax, Str, Noti
     }
 
     /**
-     * Render every flag timestamp in the viewer's local timezone. The server
-     * renders them in server time initially (readable immediately even if JS
-     * fails to load), and this replaces that with a locale-aware version.
+     * Render flag timestamps within the given scope in the viewer's local
+     * timezone. The server renders them in server time initially (readable
+     * immediately even before this runs), and this replaces that with a
+     * locale-aware version. Scoped to newly injected content rather than the
+     * whole document, since it is called again after every page load.
+     *
+     * @param {HTMLElement} scope Container to search within.
      */
-    function localizeTimestamps() {
-        document.querySelectorAll('.proctor-flag-time[data-timestamp]').forEach(function (el) {
+    function localizeTimestamps(scope) {
+        scope.querySelectorAll('.proctor-flag-time[data-timestamp]').forEach(function (el) {
             const ts = parseInt(el.dataset.timestamp, 10);
             if (!ts) {
                 return;

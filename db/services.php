@@ -41,4 +41,12 @@ $functions = [
         'ajax'        => true,
         'capabilities' => 'quizaccess/proctor:viewreport',
     ],
+    'quizaccess_proctor_get_student_flags' => [
+        'classname'   => 'quizaccess_proctor\external\get_student_flags',
+        'methodname'  => 'execute',
+        'description' => 'Fetch one page of one student\'s proctoring flags for the report page',
+        'type'        => 'read',
+        'ajax'        => true,
+        'capabilities' => 'quizaccess/proctor:viewreport',
+    ],
 ];
