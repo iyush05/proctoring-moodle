@@ -248,22 +248,51 @@ define([], function () {
 
             micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    // Automatic gain control MUST stay off: it normalises the
-                    // signal level, which is precisely the quantity this
-                    // detector measures. With AGC on, a silent room gets
-                    // amplified until background hiss looks like speech.
+                    // All three MUST stay off. This detector measures signal
+                    // level against an adaptive noise floor, and every one of
+                    // these features exists to manipulate signal level.
+                    //
+                    // Gain control is the dangerous one. Requesting
+                    // echoCancellation alone is enough to switch on Chrome's
+                    // full WebRTC audio processing chain, which applies its
+                    // own gain control regardless of autoGainControl being
+                    // false beside it. The symptom is nasty and specific:
+                    // detection works once, then the processor adapts its gain
+                    // down after that first stretch of speech, later speech is
+                    // normalised to roughly background level, the
+                    // signal-to-noise excess collapses, and nothing is flagged
+                    // again until the gain slowly recovers — minutes later.
+                    //
+                    // The cost is that audio played by the quiz page itself
+                    // (media questions) can now be picked up and attributed to
+                    // the student. That is the lesser problem: it is rare, it
+                    // shows up as a reviewable flag, and the steadiness test
+                    // rejects most sustained playback anyway.
                     autoGainControl: false,
-                    // Noise suppression reshapes the background unpredictably
-                    // and would fight the adaptive noise floor.
                     noiseSuppression: false,
-                    // Echo cancellation is kept on so audio played by the quiz
-                    // page itself (media questions) is not picked up and
-                    // attributed to the student.
-                    echoCancellation: true,
+                    echoCancellation: false,
                     channelCount: 1
                 },
                 video: false
             });
+
+            // Constraints are a request, not a guarantee — a browser may
+            // silently keep its processing chain on. Since gain control
+            // quietly breaks level-based detection, report what was actually
+            // applied rather than assuming we got what we asked for.
+            const track = micStream.getAudioTracks()[0];
+            if (track && typeof track.getSettings === 'function') {
+                const s = track.getSettings();
+                if (s.autoGainControl || s.echoCancellation || s.noiseSuppression) {
+                    window.console.warn(
+                        '[Proctor VoiceDetector] Browser kept audio processing enabled ' +
+                        '(agc=' + s.autoGainControl +
+                        ' aec=' + s.echoCancellation +
+                        ' ns=' + s.noiseSuppression +
+                        '). Speech levels will be normalised, which reduces detection reliability.'
+                    );
+                }
+            }
 
             const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
             if (!AudioContextCtor) {
