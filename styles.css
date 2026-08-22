@@ -790,3 +790,324 @@
     border-radius: 8px;
     transform: scaleX(-1); /* Mirror, matching the main proctoring preview. */
 }
+
+/* ============================================
+   REPORT PAGE — STUDENT LIST / FILTER / REVIEW WORKFLOW
+   ============================================ */
+
+.proctor-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 1rem;
+    background: #1a1a2e;
+    border-radius: 10px;
+}
+
+.proctor-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.proctor-filter-group label {
+    color: #90a4ae;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.proctor-filter-group select {
+    min-width: 140px;
+}
+
+.proctor-filter-count {
+    margin-left: auto;
+    color: #90a4ae;
+    font-size: 0.85rem;
+}
+
+.proctor-student-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.proctor-student-group {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.proctor-student-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    background: #f8fafc;
+    user-select: none;
+}
+
+.proctor-student-header:hover {
+    background: #f1f5f9;
+}
+
+.proctor-student-header:focus-visible {
+    outline: 2px solid #2979ff;
+    outline-offset: -2px;
+}
+
+.proctor-student-toggle-icon {
+    color: #64748b;
+    font-size: 0.8rem;
+    width: 1em;
+    flex-shrink: 0;
+}
+
+.proctor-student-avatar {
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.proctor-student-avatar img {
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+}
+
+.proctor-student-name {
+    font-weight: 600;
+    color: #1e293b;
+    margin-right: 0.5rem;
+}
+
+.proctor-student-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex: 1;
+}
+
+.proctor-count-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 20px;
+    background: #e2e8f0;
+    color: #475569;
+    white-space: nowrap;
+}
+
+.proctor-count-badge.proctor-count-total {
+    background: #1a1a2e;
+    color: #00e5ff;
+}
+
+.proctor-count-badge.proctor-count-pending {
+    background: rgba(255, 145, 0, 0.15);
+    color: #e65100;
+}
+
+.proctor-count-badge.proctor-count-confirmed {
+    background: rgba(0, 230, 118, 0.15);
+    color: #00875a;
+}
+
+.proctor-count-badge.proctor-count-dismissed {
+    background: rgba(120, 144, 156, 0.18);
+    color: #546e7a;
+}
+
+.proctor-student-lastseen {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.proctor-student-flags {
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: #fbfcfd;
+}
+
+.proctor-flags-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+}
+
+.proctor-flags-message {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    padding: 0.6rem 0.2rem;
+    text-align: center;
+}
+
+.proctor-flags-message.proctor-flags-error {
+    color: #e65100;
+}
+
+.proctor-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.9rem;
+    padding-top: 0.6rem;
+    margin-top: 0.3rem;
+    border-top: 1px solid #eceff1;
+}
+
+.proctor-page-info {
+    font-size: 0.8rem;
+    color: #64748b;
+    white-space: nowrap;
+}
+
+.proctor-flag-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.75rem;
+    background: #fff;
+    border: 1px solid #eceff1;
+    border-radius: 8px;
+}
+
+.proctor-flag-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 1;
+    min-width: 260px;
+}
+
+.proctor-flag-time {
+    font-size: 0.82rem;
+    color: #475569;
+}
+
+.proctor-flag-attempt-link {
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.proctor-flag-detail {
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.proctor-flag-card .proctor-snapshot-thumb {
+    max-width: 60px;
+    max-height: 45px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.proctor-flag-card .proctor-snapshot-thumb:hover {
+    transform: scale(2.2);
+    position: relative;
+    z-index: 5;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.proctor-flag-review {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.proctor-review-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-right: 0.25rem;
+}
+
+/* Review state accents down the card's left edge, so the current status
+   reads at a glance without following each card back to its buttons. */
+.proctor-flag-card[data-review="confirmed"] {
+    border-left: 3px solid #00c853;
+}
+
+.proctor-flag-card[data-review="dismissed"] {
+    border-left: 3px solid #90a4ae;
+    opacity: 0.7;
+}
+
+.proctor-flag-card[data-review="pending"] {
+    border-left: 3px solid #ff9100;
+}
+
+/* Only the action relevant to the current state is shown — confirming an
+   already-confirmed flag makes no sense, so the button for the current
+   state is hidden rather than merely disabled. Pending shows confirm and
+   dismiss; either reviewed state shows only undo. */
+.proctor-flag-card[data-review="pending"] .proctor-btn-undo,
+.proctor-flag-card:not([data-review="pending"]) .proctor-btn-confirm,
+.proctor-flag-card:not([data-review="pending"]) .proctor-btn-dismiss {
+    display: none;
+}
+
+/* Snapshot lightbox modal. */
+.proctor-modal-backdrop {
+    display: none;
+    position: fixed;
+    z-index: 99999;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(5px);
+    justify-content: center;
+    align-items: center;
+}
+
+.proctor-modal-backdrop.proctor-modal-open {
+    display: flex;
+}
+
+.proctor-modal-close {
+    position: absolute;
+    top: 20px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.proctor-modal-img {
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 640px) {
+    .proctor-student-header {
+        flex-wrap: wrap;
+    }
+
+    .proctor-student-lastseen {
+        order: 10;
+        width: 100%;
+        padding-left: 2rem;
+    }
+
+    .proctor-flag-review {
+        margin-left: 0;
+        width: 100%;
+    }
+}
