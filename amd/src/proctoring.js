@@ -92,6 +92,20 @@ define([
         async function init(cfg) {
             config = cfg;
 
+            // Expand the self-hosted asset URLs from the plugin root. PHP
+            // sends only the root: spelling out all five here would push the
+            // js_call_amd payload past the 1024-character limit Moodle warns
+            // about, and they only ever differ by their suffix anyway.
+            if (config.pluginUrl) {
+                config.modelUrl = config.pluginUrl + '/thirdparty/models';
+                config.cocoModelUrl = config.pluginUrl + '/thirdparty/coco-ssd-model/model.json';
+                config.faceMeshDetectorModelUrl = config.pluginUrl +
+                    '/thirdparty/facemesh-model/detector/model.json';
+                config.faceMeshLandmarkModelUrl = config.pluginUrl +
+                    '/thirdparty/facemesh-model/landmark/model.json';
+                config.voiceWorkletUrl = config.pluginUrl + '/js/vad_worklet.js';
+            }
+
             // Build the overlay UI.
             createOverlayUI();
 

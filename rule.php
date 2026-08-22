@@ -265,9 +265,6 @@ class quizaccess_proctor extends access_rule_base {
             $userpicture->size = 1;
             $profileimageurl = $userpicture->get_url($page)->out(false);
 
-            // Model URL for face-api.js.
-            $modelurl = $CFG->wwwroot . '/mod/quiz/accessrule/proctor/thirdparty/models';
-
             // Load libraries in specific order to avoid tf.js version conflicts!
             // face-api bundles an older tf.js which must not overwrite the newer tf.min.js.
             $page->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/face-api.min.js'), true);
@@ -288,6 +285,16 @@ class quizaccess_proctor extends access_rule_base {
             $logid = $DB->insert_record('quizaccess_proctor_logs', $record);
 
             // Prepare config for the proctoring JS.
+            //
+            // Kept deliberately small. Moodle warns once the arguments to
+            // js_call_amd exceed 1024 characters, and the full set of values
+            // this module needs comfortably exceeds that. Two things keep it
+            // down: the self-hosted asset URLs all share the plugin root, so
+            // only that root is sent and the JS derives the rest; and settings
+            // that are fixed rather than administrator-configurable are left
+            // to the defaults already declared in the JS modules, instead of
+            // being restated here. Only values that genuinely vary per
+            // attempt, per quiz, or per site are passed.
             $jsconfig = [
                 'logId'           => $logid,
                 'attemptId'       => $attempt,
@@ -296,29 +303,16 @@ class quizaccess_proctor extends access_rule_base {
                 'cmId'            => $cmid,
                 'profileImageUrl' => $profileimageurl,
                 'hasProfilePic'   => !empty($USER->picture),
-                'modelUrl'        => $modelurl,
+                // Root for every self-hosted model and worklet file. The JS
+                // builds the individual URLs from this — see proctoring.js.
+                // Self-hosting matters: these were once not passed at all, and
+                // the detector silently fell back to fetching models from
+                // Google's CDN instead of running fully offline as intended.
+                'pluginUrl'       => $CFG->wwwroot . '/mod/quiz/accessrule/proctor',
+                // Not defaulted in JS (the module's own fallback is faster than
+                // intended), so it has to be stated.
                 'captureInterval' => 2000,  // Face detection every 2 seconds.
-                'reportInterval'  => 15000, // Send report to server every 15 seconds.
-                'matchThreshold'  => 0.50,  // Stricter Euclidean distance threshold (default was 0.6).
-                'quizUrl'         => (new moodle_url('/mod/quiz/view.php', ['id' => $cmid]))->out(),
-                // Object detection config.
-                'objectDetectionEnabled'     => true,
-                'cocoModelUrl'               => $CFG->wwwroot
-                    . '/mod/quiz/accessrule/proctor/thirdparty/coco-ssd-model/model.json',
-                'objectDetectionInterval'    => 3000,  // Object detection every 3 seconds.
-                'objectPersistenceThreshold' => 2,     // Must appear in 2 consecutive frames.
-                'objectScoreThreshold'       => 0.5,   // 50% minimum confidence.
-                'prohibitedObjects'          => ['cell phone', 'book', 'laptop'],
-                
-                // Gaze tracking config.
-                // Self-hosted MediaPipe FaceMesh model files — these were previously
-                // never passed to the JS module, so the detector silently fell back
-                // to fetching the model from Google's tfhub.dev CDN at runtime
-                // instead of running fully client-side/offline as intended.
-                'faceMeshDetectorModelUrl' => $CFG->wwwroot
-                    . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/detector/model.json',
-                'faceMeshLandmarkModelUrl' => $CFG->wwwroot
-                    . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model/landmark/model.json',
+                'objectDetectionEnabled' => true,
                 // These are admin-configured CEILINGS, not fixed working values.
                 // A student's own 5-point calibration (see gaze_tracker.js) may
                 // refine — i.e. tighten — the effective threshold for their own
@@ -330,18 +324,10 @@ class quizaccess_proctor extends access_rule_base {
                 'gazeYawRightThreshold' => isset($this->quiz->gaze_yaw_right_threshold) ? (int)$this->quiz->gaze_yaw_right_threshold : 30,
                 'gazePitchUpThreshold' => isset($this->quiz->gaze_pitch_up_threshold) ? (int)$this->quiz->gaze_pitch_up_threshold : 20,
                 'gazePitchDownThreshold' => isset($this->quiz->gaze_pitch_down_threshold) ? (int)$this->quiz->gaze_pitch_down_threshold : 25,
-                // 2 consecutive violation frames at the 2s captureInterval above
-                // == roughly a 4 second sustained look-away before flagging.
-                // Keep these two in sync — see the tuning note on
-                // DEFAULT_PERSISTENCE_THRESHOLD in gaze_tracker.js.
-                'gazePersistenceThreshold' => 2,
-
                 // Voice detection config. Detects only sustained continuous
                 // speech — no speaker identification, no recording, no audio
                 // ever leaves the browser (see voice_detector.js).
                 'voiceDetectionEnabled' => !empty($this->quiz->voice_detection_enabled),
-                'voiceWorkletUrl' => $CFG->wwwroot
-                    . '/mod/quiz/accessrule/proctor/js/vad_worklet.js',
                 // Admin-configured ceiling: how long the student may speak
                 // continuously before it's flagged. Unlike the gaze
                 // thresholds this needs no per-student calibration — there is
@@ -349,10 +335,6 @@ class quizaccess_proctor extends access_rule_base {
                 // the configured value is used directly.
                 'voiceMaxContinuousSpeech' => isset($this->quiz->voice_max_continuous_speech)
                     ? (int)$this->quiz->voice_max_continuous_speech : 8,
-                // Silence shorter than this doesn't end an episode, so normal
-                // pauses between words and sentences don't keep resetting the
-                // timer to zero.
-                'voiceGapToleranceMs' => 400,
                 // Per-frame diagnostics in the console. Tied to the site's
                 // developer debugging level so it is automatically silent in
                 // production but available when tuning against a real
