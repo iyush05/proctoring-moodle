@@ -33,4 +33,12 @@ $functions = [
         'ajax'        => true,
         'capabilities' => '',
     ],
+    'quizaccess_proctor_mark_log' => [
+        'classname'   => 'quizaccess_proctor\external\mark_log',
+        'methodname'  => 'execute',
+        'description' => 'Mark a proctoring log entry as confirmed, dismissed, or pending review',
+        'type'        => 'write',
+        'ajax'        => true,
+        'capabilities' => 'quizaccess/proctor:viewreport',
+    ],
 ];

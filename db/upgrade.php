@@ -200,5 +200,56 @@ function xmldb_quizaccess_proctor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026082200, 'quizaccess', 'proctor');
     }
 
+    if ($oldversion < 2026082300) {
+        // Teacher review workflow: each flag can be marked confirmed or
+        // dismissed, supporting the redesigned report page (grouped by
+        // student, filterable by review status and detection type).
+        $table = new xmldb_table('quizaccess_proctor_logs');
+
+        $field = new xmldb_field(
+            'review_status',
+            XMLDB_TYPE_CHAR,
+            '20',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            'pending',
+            'timecreated'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field(
+            'reviewed_by',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            null,
+            null,
+            null,
+            'review_status'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field(
+            'reviewed_at',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            null,
+            null,
+            null,
+            'reviewed_by'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026082300, 'quizaccess', 'proctor');
+    }
+
     return true;
 }

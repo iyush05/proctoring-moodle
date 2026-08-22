@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026082200"
+<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026082300"
        COMMENT="XMLDB file for quizaccess_proctor plugin"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xsi:noNamespaceSchemaLocation="../../../../../lib/xmldb/xmldb.xsd"
@@ -53,6 +53,12 @@
                        COMMENT="Continuous-speech episode: label,duration_seconds,avg_confidence (e.g. talking,8.4,0.82). No audio is stored."/>
                 <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
                        COMMENT="Timestamp of this log entry"/>
+                <FIELD NAME="review_status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="pending" SEQUENCE="false"
+                       COMMENT="Teacher review outcome for this flag: pending, confirmed, dismissed"/>
+                <FIELD NAME="reviewed_by" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="User ID of the teacher who last set review_status, null while pending"/>
+                <FIELD NAME="reviewed_at" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="Timestamp review_status was last changed, null while pending"/>
 
             </FIELDS>
             <KEYS>

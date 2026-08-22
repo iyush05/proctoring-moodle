@@ -135,6 +135,28 @@ $string['voiceviolations'] = 'Voice Violations';
 $string['report_voice'] = 'Voice';
 $string['voice_data_log'] = 'Spoke for {$a->duration}s (confidence {$a->confidence})';
 
+// Report page: student grouping, filters, review workflow.
+$string['report_flags_count'] = 'flags';
+$string['filter_review_label'] = 'Review status';
+$string['filter_type_label'] = 'Detection type';
+$string['filter_all'] = 'All';
+$string['filter_type_face'] = 'Face';
+$string['filter_type_gaze'] = 'Gaze';
+$string['filter_type_object'] = 'Object';
+$string['filter_type_voice'] = 'Voice';
+$string['filter_type_other'] = 'Other';
+$string['filter_count_showing'] = 'Showing {$a->shown} of {$a->total} flags';
+$string['review_pending'] = 'Pending';
+$string['review_confirmed'] = 'Confirmed';
+$string['review_dismissed'] = 'Dismissed';
+$string['reviewed_by_at'] = '{$a->name}, {$a->time}';
+$string['action_confirm'] = 'Confirm';
+$string['action_dismiss'] = 'Dismiss';
+$string['action_undo'] = 'Undo';
+$string['elapsed_since_start'] = 'Elapsed time since attempt start';
+$string['flags_truncated'] = 'Showing the {$a->shown} most recent flags of {$a->total} total for this student.';
+$string['mark_review_error'] = 'Could not update the review status — please try again.';
+
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';
 $string['error_no_microphone'] = 'Unable to access the microphone. Please ensure it is connected and you have granted permission.';
