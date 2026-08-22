@@ -17,6 +17,12 @@ define(['core/notification'], function (Notification) {
     /** @type {Object} */
     let config = {};
 
+    /** @type {MediaStream|null} Microphone stream used for the level preview. */
+    let micStream = null;
+
+    /** @type {AudioContext|null} Audio context for the microphone level preview. */
+    let micContext = null;
+
     /**
      * Initialize the preflight webcam check.
      *
@@ -28,6 +34,23 @@ define(['core/notification'], function (Notification) {
         videoEl = document.getElementById('proctor-preflight-video');
         if (!videoEl) {
             return;
+        }
+
+        // Microphone setup runs independently of the camera checks: it must
+        // still be attempted if the camera fails, and a mic failure must not
+        // abort the camera preview.
+        if (config.voiceDetectionEnabled) {
+            startMicCheck();
+        } else {
+            // Logged rather than passed over silently: "no microphone prompt
+            // appeared" is otherwise indistinguishable from a broken pipeline,
+            // when the usual cause is simply that the quiz has voice detection
+            // switched off.
+            console.log(
+                '[Proctor Preflight] Voice detection is disabled for this quiz — ' +
+                'microphone not requested. Enable it in Quiz settings > ' +
+                'Extra restrictions on attempts > Enable voice detection.'
+            );
         }
 
         try {
@@ -45,6 +68,86 @@ define(['core/notification'], function (Notification) {
         } catch (err) {
             console.error('[Proctor Preflight]', err);
             updateStatus('proctor-camera-status', 'error', 'Error: ' + err.message);
+        }
+    }
+
+    /**
+     * Request microphone access and show a live input level, so the student
+     * can confirm the microphone actually works before starting the attempt
+     * rather than discovering it mid-quiz.
+     *
+     * Only the input level is measured here — no speech detection runs during
+     * preflight, and nothing is recorded or sent anywhere.
+     */
+    async function startMicCheck() {
+        const levelBar = document.getElementById('proctor-mic-level-bar');
+
+        try {
+            updateStatus('proctor-mic-status', 'warning', 'Requesting microphone access...');
+
+            micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    // Matches the capture settings used during the attempt —
+                    // see voice_detector.js for why AGC stays off.
+                    autoGainControl: false,
+                    noiseSuppression: false,
+                    echoCancellation: true,
+                    channelCount: 1
+                },
+                video: false
+            });
+
+            const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextCtor) {
+                throw new Error('Web Audio API unavailable');
+            }
+
+            micContext = new AudioContextCtor();
+            if (micContext.state === 'suspended') {
+                await micContext.resume();
+            }
+
+            const source = micContext.createMediaStreamSource(micStream);
+            const analyser = micContext.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+
+            const samples = new Float32Array(analyser.fftSize);
+
+            updateStatus('proctor-mic-status', 'success', 'Microphone ready — speak to test');
+
+            // A plain rAF loop is fine here: this is only a visual meter, so a
+            // dropped frame costs nothing. The attempt page uses an
+            // AudioWorklet instead, where timing accuracy actually matters.
+            const drawLevel = function () {
+                if (!micContext || !levelBar) {
+                    return;
+                }
+
+                analyser.getFloatTimeDomainData(samples);
+
+                let sumSquares = 0;
+                for (let i = 0; i < samples.length; i++) {
+                    sumSquares += samples[i] * samples[i];
+                }
+                const rms = Math.sqrt(sumSquares / samples.length);
+
+                // 0.15 RMS is roughly a normal speaking voice at desk distance,
+                // so ordinary speech fills most of the bar without clipping.
+                const level = Math.min(100, Math.round((rms / 0.15) * 100));
+                levelBar.style.width = level + '%';
+
+                requestAnimationFrame(drawLevel);
+            };
+            requestAnimationFrame(drawLevel);
+
+        } catch (err) {
+            console.error('[Proctor Preflight] Microphone error:', err);
+            updateStatus(
+                'proctor-mic-status',
+                'error',
+                'Microphone unavailable — please allow microphone access'
+            );
         }
     }
 

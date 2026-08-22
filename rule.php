@@ -101,12 +101,17 @@ class quizaccess_proctor extends access_rule_base {
             true
         );
 
+        // Voice detection is optional per quiz — when it's off, no microphone
+        // is requested and no mic UI or consent is shown at all.
+        $voiceenabled = !empty($this->quiz->voice_detection_enabled);
+
         // Prepare config for the JS preflight module.
         $jsconfig = [
             'profileImageUrl' => $profileimageurl,
             'modelUrl'        => $modelurl,
             'hasProfilePic'   => !empty($USER->picture),
             'matchThreshold'  => 0.50,
+            'voiceDetectionEnabled' => $voiceenabled,
         ];
 
         $PAGE->requires->js_call_amd('quizaccess_proctor/preflight', 'init', [$jsconfig]);
@@ -151,6 +156,22 @@ class quizaccess_proctor extends access_rule_base {
             </div>
         ');
 
+        // Microphone status row and live input level, shown only when voice
+        // detection is enabled for this quiz.
+        if ($voiceenabled) {
+            $mform->addElement('html', '
+                <div class="proctor-mic-setup">
+                    <div class="proctor-status-item" id="proctor-mic-status">
+                        <span class="proctor-status-icon"></span>
+                        <span>' . get_string('status_mic_init', 'quizaccess_proctor') . '</span>
+                    </div>
+                    <div class="proctor-mic-level" aria-hidden="true">
+                        <div class="proctor-mic-level-bar" id="proctor-mic-level-bar"></div>
+                    </div>
+                </div>
+            ');
+        }
+
         // Hidden field to store the reference face descriptor.
         $mform->addElement('html', '<input type="hidden" id="proctor-reference-descriptor" name="proctor_reference_descriptor" value="" />');
         $mform->addElement('html', '<input type="hidden" id="proctor-profile-image" value="' . s($profileimageurl) . '" />');
@@ -173,6 +194,26 @@ class quizaccess_proctor extends access_rule_base {
             'client'
         );
 
+        // Microphone monitoring gets its own consent line rather than being
+        // folded into the webcam one: it is a separate browser permission and
+        // a materially different intrusion, so agreeing to one must not imply
+        // agreeing to the other.
+        if ($voiceenabled) {
+            $mform->addElement(
+                'checkbox',
+                'proctor_mic_consent',
+                '',
+                get_string('mic_consent_label', 'quizaccess_proctor')
+            );
+            $mform->addRule(
+                'proctor_mic_consent',
+                get_string('mic_consent_required', 'quizaccess_proctor'),
+                'required',
+                null,
+                'client'
+            );
+        }
+
         $mform->addElement('html', '</div>'); // End consent wrapper
 
         $mform->addElement('html', '</div>'); // End proctor-preflight-container
@@ -190,6 +231,12 @@ class quizaccess_proctor extends access_rule_base {
     public function validate_preflight_check($data, $files, $errors, $attemptid) {
         if (empty($data['proctor_consent'])) {
             $errors['proctor_consent'] = get_string('consent_required', 'quizaccess_proctor');
+        }
+        // Only required when the quiz actually uses voice detection — the
+        // checkbox isn't rendered otherwise, so requiring it would make the
+        // form impossible to submit.
+        if (!empty($this->quiz->voice_detection_enabled) && empty($data['proctor_mic_consent'])) {
+            $errors['proctor_mic_consent'] = get_string('mic_consent_required', 'quizaccess_proctor');
         }
         return $errors;
     }
@@ -287,7 +334,31 @@ class quizaccess_proctor extends access_rule_base {
                 // == roughly a 4 second sustained look-away before flagging.
                 // Keep these two in sync — see the tuning note on
                 // DEFAULT_PERSISTENCE_THRESHOLD in gaze_tracker.js.
-                'gazePersistenceThreshold' => 2
+                'gazePersistenceThreshold' => 2,
+
+                // Voice detection config. Detects only sustained continuous
+                // speech — no speaker identification, no recording, no audio
+                // ever leaves the browser (see voice_detector.js).
+                'voiceDetectionEnabled' => !empty($this->quiz->voice_detection_enabled),
+                'voiceWorkletUrl' => $CFG->wwwroot
+                    . '/mod/quiz/accessrule/proctor/js/vad_worklet.js',
+                // Admin-configured ceiling: how long the student may speak
+                // continuously before it's flagged. Unlike the gaze
+                // thresholds this needs no per-student calibration — there is
+                // no screen geometry or seating distance to personalise, so
+                // the configured value is used directly.
+                'voiceMaxContinuousSpeech' => isset($this->quiz->voice_max_continuous_speech)
+                    ? (int)$this->quiz->voice_max_continuous_speech : 8,
+                // Silence shorter than this doesn't end an episode, so normal
+                // pauses between words and sentences don't keep resetting the
+                // timer to zero.
+                'voiceGapToleranceMs' => 400,
+                // Per-frame diagnostics in the console. Tied to the site's
+                // developer debugging level so it is automatically silent in
+                // production but available when tuning against a real
+                // microphone, whose signal levels vary far more between
+                // devices than any synthetic test can represent.
+                'voiceDebug' => debugging('', DEBUG_DEVELOPER),
             ];
 
             $page->requires->js_call_amd('quizaccess_proctor/proctoring', 'init', [$jsconfig]);
@@ -360,6 +431,32 @@ class quizaccess_proctor extends access_rule_base {
         );
         $mform->addHelpButton('gaze_calibration_helper', 'gaze_calibration_helper', 'quizaccess_proctor');
 
+        // Voice detection. Kept as a separate opt-in from proctoring as a
+        // whole because it needs its own microphone permission and its own
+        // student consent, so a teacher who only wants camera proctoring
+        // shouldn't have to ask for a microphone too.
+        $mform->addElement(
+            'select',
+            'voice_detection_enabled',
+            get_string('enable_voice_detection', 'quizaccess_proctor'),
+            [
+                0 => get_string('no'),
+                1 => get_string('yes'),
+            ]
+        );
+        $mform->addHelpButton('voice_detection_enabled', 'enable_voice_detection', 'quizaccess_proctor');
+        $mform->setDefault('voice_detection_enabled', 0);
+
+        $mform->addElement(
+            'text',
+            'voice_max_continuous_speech',
+            get_string('voice_max_continuous_speech', 'quizaccess_proctor')
+        );
+        $mform->setType('voice_max_continuous_speech', PARAM_INT);
+        $mform->setDefault('voice_max_continuous_speech', 8);
+        $mform->addHelpButton('voice_max_continuous_speech', 'voice_max_continuous_speech', 'quizaccess_proctor');
+        $mform->hideIf('voice_max_continuous_speech', 'voice_detection_enabled', 'eq', 0);
+
         $facemeshbase = $CFG->wwwroot . '/mod/quiz/accessrule/proctor/thirdparty/facemesh-model';
         $PAGE->requires->js(new \moodle_url('/mod/quiz/accessrule/proctor/thirdparty/tf.min.js'), true);
         $PAGE->requires->js(
@@ -397,6 +494,14 @@ class quizaccess_proctor extends access_rule_base {
         if (empty($quiz->proctor_enabled)) {
             $DB->delete_records('quizaccess_proctor', ['quizid' => $quiz->id]);
         } else {
+            // Clamp the speech limit into a sane range. A zero or negative
+            // ceiling would make the very first speech frame a violation and
+            // flag continuously for the whole attempt, so the lower bound is
+            // enforced here rather than trusting the typed value.
+            $maxspeech = isset($quiz->voice_max_continuous_speech)
+                ? (int)$quiz->voice_max_continuous_speech : 8;
+            $maxspeech = max(2, min(300, $maxspeech));
+
             $record = (object) [
                 'quizid'                    => $quiz->id,
                 'proctor_enabled'           => 1,
@@ -404,6 +509,8 @@ class quizaccess_proctor extends access_rule_base {
                 'gaze_yaw_right_threshold'  => isset($quiz->gaze_yaw_right_threshold) ? (int)$quiz->gaze_yaw_right_threshold : 30,
                 'gaze_pitch_up_threshold'   => isset($quiz->gaze_pitch_up_threshold) ? (int)$quiz->gaze_pitch_up_threshold : 20,
                 'gaze_pitch_down_threshold' => isset($quiz->gaze_pitch_down_threshold) ? (int)$quiz->gaze_pitch_down_threshold : 25,
+                'voice_detection_enabled'   => !empty($quiz->voice_detection_enabled) ? 1 : 0,
+                'voice_max_continuous_speech' => $maxspeech,
             ];
 
             if ($existing = $DB->get_record('quizaccess_proctor', ['quizid' => $quiz->id])) {
@@ -438,7 +545,9 @@ class quizaccess_proctor extends access_rule_base {
             'proctor.gaze_yaw_left_threshold AS gaze_yaw_left_threshold, ' .
             'proctor.gaze_yaw_right_threshold AS gaze_yaw_right_threshold, ' .
             'proctor.gaze_pitch_up_threshold AS gaze_pitch_up_threshold, ' .
-            'proctor.gaze_pitch_down_threshold AS gaze_pitch_down_threshold',
+            'proctor.gaze_pitch_down_threshold AS gaze_pitch_down_threshold, ' .
+            'proctor.voice_detection_enabled AS voice_detection_enabled, ' .
+            'proctor.voice_max_continuous_speech AS voice_max_continuous_speech',
             'LEFT JOIN {quizaccess_proctor} proctor ON proctor.quizid = quiz.id',
             [],
         ];

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026081602"
+<XMLDB PATH="mod/quiz/accessrule/proctor/db" VERSION="2026082200"
        COMMENT="XMLDB file for quizaccess_proctor plugin"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xsi:noNamespaceSchemaLocation="../../../../../lib/xmldb/xmldb.xsd"
@@ -18,6 +18,8 @@
                 <FIELD NAME="gaze_pitch_down_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="15" SEQUENCE="false" COMMENT="Gaze Pitch Down Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
                 <FIELD NAME="gaze_yaw_left_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Left Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
                 <FIELD NAME="gaze_yaw_right_threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="Gaze Yaw Right Threshold — admin-configured ceiling, refined per-student by calibration but never exceeded"/>
+                <FIELD NAME="voice_detection_enabled" TYPE="int" LENGTH="2" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether continuous-speech detection is enabled for this quiz — separate opt-in from proctor_enabled because it needs its own microphone permission and consent"/>
+                <FIELD NAME="voice_max_continuous_speech" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="8" SEQUENCE="false" COMMENT="Seconds of continuous speech allowed before a talking_detected violation is flagged"/>
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
@@ -38,7 +40,7 @@
                 <FIELD NAME="attemptid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"
                        COMMENT="Quiz attempt ID"/>
                 <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="active" SEQUENCE="false"
-                       COMMENT="Detection status: match, mismatch, no_face, multiple_faces, phone_detected, looking_away, error, active"/>
+                       COMMENT="Detection status: match, mismatch, no_face, multiple_faces, phone_detected, looking_away, talking_detected, error, active"/>
                 <FIELD NAME="confidence" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="false" SEQUENCE="false"
                        COMMENT="Face match distance score (lower = better match)"/>
                 <FIELD NAME="image_data" TYPE="text" NOTNULL="false" SEQUENCE="false"
@@ -47,6 +49,8 @@
                        COMMENT="Comma-separated list of prohibited objects detected (e.g. cell phone,book)"/>
                 <FIELD NAME="gaze_data" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"
                        COMMENT="Gaze tracking data: direction,yaw,pitch (e.g. left,-35.2,5.1)"/>
+                <FIELD NAME="voice_data" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"
+                       COMMENT="Continuous-speech episode: label,duration_seconds,avg_confidence (e.g. talking,8.4,0.82). No audio is stored."/>
                 <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"
                        COMMENT="Timestamp of this log entry"/>
 
