@@ -80,6 +80,7 @@ $noface = 0;
 $multiface = 0;
 $phonedetected = 0;
 $lookingaway = 0;
+$talkingdetected = 0;
 $errors = 0;
 
 foreach ($logs as $log) {
@@ -102,6 +103,9 @@ foreach ($logs as $log) {
         case 'looking_away':
             $lookingaway++;
             break;
+        case 'talking_detected':
+            $talkingdetected++;
+            break;
         case 'error':
             $errors++;
             break;
@@ -109,7 +113,7 @@ foreach ($logs as $log) {
 }
 
 $matchrate = $totalchecks > 0 ? round(($matches / $totalchecks) * 100, 1) : 0;
-$violations = $mismatches + $noface + $multiface + $phonedetected + $lookingaway;
+$violations = $mismatches + $noface + $multiface + $phonedetected + $lookingaway + $talkingdetected;
 
 // Display summary cards.
 echo '<div class="proctor-report-container">';
@@ -145,6 +149,11 @@ echo '<div class="card-value" style="color: #d500f9;">' . $lookingaway . '</div>
 echo '<div class="card-label">' . get_string('gazeviolations', 'quizaccess_proctor') . '</div>';
 echo '</div>';
 
+echo '<div class="proctor-summary-card" style="border-left: 3px solid #00acc1;">';
+echo '<div class="card-value" style="color: #00acc1;">' . $talkingdetected . '</div>';
+echo '<div class="card-label">' . get_string('voiceviolations', 'quizaccess_proctor') . '</div>';
+echo '</div>';
+
 echo '</div>'; // End summary.
 
 // Display logs table.
@@ -160,6 +169,7 @@ if (empty($logs)) {
     echo '<th>' . get_string('report_confidence', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_objects', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('gazeviolations', 'quizaccess_proctor') . '</th>';
+    echo '<th>' . get_string('report_voice', 'quizaccess_proctor') . '</th>';
     echo '<th>' . get_string('report_snapshot', 'quizaccess_proctor') . '</th>';
     echo '</tr></thead>';
     echo '<tbody>';
@@ -196,6 +206,7 @@ if (empty($logs)) {
             'multiple_faces' => ['class' => 'proctor-badge-multiface', 'label' => get_string('status_multiface', 'quizaccess_proctor')],
             'phone_detected' => ['class' => 'proctor-badge-phone',     'label' => get_string('status_phone', 'quizaccess_proctor')],
             'looking_away'   => ['class' => 'proctor-badge-gaze',      'label' => get_string('snapshotstatus_looking_away', 'quizaccess_proctor')],
+            'talking_detected' => ['class' => 'proctor-badge-talking', 'label' => get_string('snapshotstatus_talking_detected', 'quizaccess_proctor')],
             'error'          => ['class' => 'proctor-badge-error',     'label' => get_string('status_error', 'quizaccess_proctor')],
             'active'         => ['class' => 'proctor-badge-active',    'label' => get_string('status_active', 'quizaccess_proctor')],
         ];
@@ -261,6 +272,22 @@ if (empty($logs)) {
             }
         }
         echo '<td>' . $gazehtml . '</td>';
+
+        // Voice data: the flagged continuous-speech episode, as
+        // label,duration_seconds,avg_confidence. No audio is ever stored.
+        $voicehtml = '-';
+        if (!empty($log->voice_data)) {
+            $voice = explode(',', $log->voice_data);
+            if (count($voice) >= 3) {
+                $voiceobj = (object)[
+                    'duration'   => format_float((float)trim($voice[1]), 1),
+                    'confidence' => format_float((float)trim($voice[2]), 2),
+                ];
+                $voicehtml = '<span style="font-size:0.85rem;">'
+                    . get_string('voice_data_log', 'quizaccess_proctor', $voiceobj) . '</span>';
+            }
+        }
+        echo '<td>' . $voicehtml . '</td>';
 
         echo '<td>' . $snapshothtml . '</td>';
         echo '</tr>';

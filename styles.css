@@ -614,6 +614,50 @@
 }
 
 /* ============================================
+   VOICE DETECTION STYLES
+   ============================================ */
+
+/* Voice violation status indicator (flashing cyan) */
+.proctor-status-talking {
+    background: #00acc1;
+    box-shadow: 0 0 8px rgba(0, 172, 193, 0.6);
+    animation: pulse-glow-cyan 1.2s infinite;
+}
+
+@keyframes pulse-glow-cyan {
+    0%, 100% { box-shadow: 0 0 4px rgba(0, 172, 193, 0.4); }
+    50% { box-shadow: 0 0 14px rgba(0, 172, 193, 0.9); }
+}
+
+/* Voice badge for report table */
+.proctor-badge-talking {
+    background: rgba(0, 172, 193, 0.15);
+    color: #00838f;
+}
+
+/* Microphone check block in the preflight panel */
+.proctor-mic-setup {
+    margin-top: 12px;
+}
+
+/* Live microphone input level meter shown during preflight */
+.proctor-mic-level {
+    height: 6px;
+    margin-top: 8px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+}
+
+.proctor-mic-level-bar {
+    width: 0;
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #00acc1, #00e676);
+    transition: width 0.08s linear;
+}
+
+/* ============================================
    RESPONSIVE DESIGN
    ============================================ */
 

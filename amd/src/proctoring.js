@@ -24,8 +24,9 @@ define([
     'core/str',
     'quizaccess_proctor/object_detector',
     'quizaccess_proctor/gaze_tracker',
-    'quizaccess_proctor/gaze_calibration_ui'
-], function (Ajax, Notification, Str, ObjectDetector, GazeTracker, GazeCalibrationUI) {
+    'quizaccess_proctor/gaze_calibration_ui',
+    'quizaccess_proctor/voice_detector'
+], function (Ajax, Notification, Str, ObjectDetector, GazeTracker, GazeCalibrationUI, VoiceDetector) {
 
         /** @type {Object} Configuration passed from PHP. */
         let config = {};
@@ -51,6 +52,9 @@ define([
         /** @type {boolean} Whether the gaze tracking model is loaded and ready. */
         let gazeTrackerReady = false;
 
+        /** @type {boolean} Whether the microphone pipeline is live. */
+        let voiceDetectorReady = false;
+
         /** @type {boolean} Whether the proctoring engine is active. */
         let isActive = false;
 
@@ -65,6 +69,9 @@ define([
 
         /** @type {number} Timestamp of the last immediate violation report sent. */
         let lastViolationReportTime = 0;
+
+        /** @type {number|null} Timer that auto-hides the overlay warning banner. */
+        let warningHideTimer = null;
 
         /** @type {Object} Current detection state for UI updates. */
         let currentState = {
@@ -129,6 +136,19 @@ define([
                     await runGazeCalibration();
                 }
 
+                // Step 4.6: Start voice detection. Deliberately after
+                // calibration so the microphone permission prompt cannot
+                // appear over the full-screen calibration sequence. Failure
+                // here is non-fatal — the mic may be missing or blocked, and
+                // camera-based proctoring must carry on regardless.
+                if (config.voiceDetectionEnabled) {
+                    updateOverlayStatus('loading', 'Starting microphone...');
+                    voiceDetectorReady = await VoiceDetector.init(config, onVoiceViolation);
+                    if (!voiceDetectorReady) {
+                        console.warn('[Proctor] Voice detection unavailable — continuing without it');
+                    }
+                }
+
                 // Step 5: Start continuous detection.
                 isActive = true;
                 startDetectionLoop();
@@ -159,6 +179,65 @@ define([
             await GazeCalibrationUI.run(GazeTracker, videoEl, {
                 completionText: 'Calibration complete! Starting quiz…'
             });
+        }
+
+        /**
+         * Handle a confirmed continuous-speech violation.
+         *
+         * Unlike the video checks, this is not driven by the detection loop:
+         * voice_detector.js calls straight through the moment the student has
+         * been speaking continuously for longer than the quiz allows, so the
+         * flag lands at the instant it happens rather than up to one capture
+         * interval later. It can afford to be immediate because the required
+         * duration is itself the filter — a cough or a short remark never
+         * reaches it.
+         *
+         * @param {Object} episode The flagged episode: startedAt, endedAt,
+         *   duration (seconds), confidence.
+         */
+        function onVoiceViolation(episode) {
+            resultBuffer.push({
+                status: 'talking_detected',
+                // The confidence column carries face-match distance; the voice
+                // episode's own confidence travels in voiceData instead.
+                confidence: 0,
+                imageData: captureSnapshot(),
+                timestamp: episode.endedAt,
+                objectsDetected: '',
+                gazeData: '',
+                voiceData: VoiceDetector.formatForReport()
+            });
+
+            showWarning('Continuous speech detected — please do not talk during the quiz.');
+
+            const now = Date.now();
+            if (now - lastViolationReportTime > 5000) {
+                lastViolationReportTime = now;
+                sendReport();
+            }
+
+            VoiceDetector.clearViolation();
+        }
+
+        /**
+         * Capture a small JPEG snapshot of the current webcam frame.
+         *
+         * @returns {string} Base64 data URL, or '' if capture failed.
+         */
+        function captureSnapshot() {
+            if (!videoEl || !videoEl.videoWidth) {
+                return '';
+            }
+            try {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = 320;
+                tempCanvas.height = 240;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(videoEl, 0, 0, 320, 240);
+                return tempCanvas.toDataURL('image/jpeg', 0.6);
+            } catch (e) {
+                return '';
+            }
         }
 
         /**
@@ -483,16 +562,7 @@ define([
             // Capture an immediate snapshot if there is a violation.
             let imageData = '';
             if (status !== 'match') {
-                try {
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = 320;
-                    tempCanvas.height = 240;
-                    const tempCtx = tempCanvas.getContext('2d');
-                    tempCtx.drawImage(videoEl, 0, 0, 320, 240);
-                    imageData = tempCanvas.toDataURL('image/jpeg', 0.6);
-                } catch (e) {
-                    imageData = '';
-                }
+                imageData = captureSnapshot();
             }
 
             // Buffer the result for batched reporting.
@@ -502,7 +572,8 @@ define([
                 imageData: imageData,
                 timestamp: Date.now(),
                 objectsDetected: (objectResult.confirmedObjects || []).join(','),
-                gazeData: gazeResult.gazeData
+                gazeData: gazeResult.gazeData,
+                voiceData: ''
             });
 
             // Update UI.
@@ -635,8 +706,9 @@ define([
                 return;
             }
 
-            // Priority order: phone_detected > looking_away > mismatch > multiple_faces > no_face > error > match.
-            const priorityOrder = ['phone_detected', 'looking_away', 'mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
+            // Priority order: phone_detected > talking_detected > looking_away >
+            // mismatch > multiple_faces > no_face > error > match.
+            const priorityOrder = ['phone_detected', 'talking_detected', 'looking_away', 'mismatch', 'multiple_faces', 'no_face', 'error', 'match'];
             let worstResult = resultBuffer[0];
             let allObjects = [];
 
@@ -659,6 +731,22 @@ define([
             // Ensure detected objects are preserved on the worstResult.
             if (allObjects.length > 0 && !worstResult.objectsDetected) {
                 worstResult.objectsDetected = allObjects.join(',');
+            }
+
+            // A voice episode is flagged from its own callback rather than from
+            // the detection loop, so it may lose the priority comparison to a
+            // camera violation buffered in the same window. Carry the voice
+            // data across to whichever record is actually sent, the same way
+            // detected objects are preserved above, so the episode is not
+            // silently dropped.
+            let voiceData = worstResult.voiceData || '';
+            if (!voiceData) {
+                for (var v = 0; v < resultBuffer.length; v++) {
+                    if (resultBuffer[v].voiceData) {
+                        voiceData = resultBuffer[v].voiceData;
+                        break;
+                    }
+                }
             }
 
             // Use the snapshot captured at the exact moment of the violation.
@@ -694,6 +782,7 @@ define([
                     imagedata: imageData,
                     objectsdetected: worstResult.objectsDetected || '',
                     gazedata: worstResult.gazeData || '',
+                    voicedata: voiceData,
                     timestamp: Math.floor((worstResult.timestamp || Date.now()) / 1000)
                 }
             }])[0].then(function (result) {
@@ -712,8 +801,6 @@ define([
             const indicator = document.getElementById('proctor-indicator');
             const statusText = document.getElementById('proctor-status-text');
             const title = document.getElementById('proctor-overlay-title');
-            const warning = document.getElementById('proctor-warning');
-            const warningText = document.getElementById('proctor-warning-text');
 
             if (!indicator || !statusText) {
                 return;
@@ -763,6 +850,12 @@ define([
                     showWarning('Please look at the screen. Gaze tracking active.');
                     break;
 
+                case 'talking_detected':
+                    indicator.className = 'proctor-overlay-indicator proctor-status-talking';
+                    statusText.textContent = 'Continuous speech detected';
+                    title.textContent = 'Proctoring ⚠';
+                    break;
+
                 case 'error':
                     indicator.className = 'proctor-overlay-indicator proctor-status-error';
                     statusText.textContent = 'Detection error';
@@ -773,31 +866,56 @@ define([
                     indicator.className = 'proctor-overlay-indicator proctor-status-loading';
                     statusText.textContent = 'Initializing...';
             }
+        }
 
-            /**
-             * Show warning banner.
-             * @param {string} message Warning message.
-             */
-            function showWarning(message) {
-                if (warning && warningText) {
-                    warning.style.display = 'block';
-                    warningText.textContent = message;
-                    // Auto-hide after 5 seconds.
-                    setTimeout(function () {
-                        if (warning) {
-                            warning.style.display = 'none';
-                        }
-                    }, 5000);
-                }
+        /**
+         * Show the overlay warning banner.
+         *
+         * @param {string} message Warning message.
+         */
+        function showWarning(message) {
+            const warning = document.getElementById('proctor-warning');
+            const warningText = document.getElementById('proctor-warning-text');
+
+            if (!warning || !warningText) {
+                return;
             }
 
-            /**
-             * Hide warning banner.
-             */
-            function hideWarning() {
-                if (warning) {
-                    warning.style.display = 'none';
+            warning.style.display = 'block';
+            warningText.textContent = message;
+
+            // Auto-hide after 5 seconds. The timer is tracked so that a later
+            // warning cannot be cut short by an earlier one's timeout firing.
+            if (warningHideTimer) {
+                clearTimeout(warningHideTimer);
+            }
+            warningHideTimer = setTimeout(function () {
+                warningHideTimer = null;
+                const el = document.getElementById('proctor-warning');
+                if (el) {
+                    el.style.display = 'none';
                 }
+            }, 5000);
+        }
+
+        /**
+         * Hide the overlay warning banner, unless it is still within its
+         * auto-hide window.
+         *
+         * This runs on every clean detection cycle, which at a 2s capture
+         * interval would otherwise cut a warning short almost immediately —
+         * most visibly for voice warnings, which are raised between cycles
+         * and would be wiped by the very next clean frame. Leaving the
+         * pending timer to do the hiding guarantees every warning stays up
+         * long enough to actually be read.
+         */
+        function hideWarning() {
+            if (warningHideTimer) {
+                return;
+            }
+            const warning = document.getElementById('proctor-warning');
+            if (warning) {
+                warning.style.display = 'none';
             }
         }
 
@@ -853,8 +971,16 @@ define([
                 reportTimer = null;
             }
 
+            if (warningHideTimer) {
+                clearTimeout(warningHideTimer);
+                warningHideTimer = null;
+            }
+
             // Stop object detector.
             ObjectDetector.stop();
+
+            // Release the microphone.
+            VoiceDetector.stop();
 
             // Send any remaining results.
             if (resultBuffer.length > 0) {

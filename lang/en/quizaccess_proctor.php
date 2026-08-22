@@ -26,7 +26,7 @@ defined('MOODLE_INTERNAL') || die();
 
 // Plugin metadata.
 $string['pluginname'] = 'AI Proctoring (Face Detection)';
-$string['privacy:metadata'] = 'The AI Proctoring plugin captures webcam snapshots and face detection data during quiz attempts for identity verification.';
+$string['privacy:metadata'] = 'The AI Proctoring plugin captures webcam snapshots and face detection data during quiz attempts for identity verification. When voice detection is enabled it also analyses microphone input in the browser to detect continuous speech; no audio is recorded, transmitted, or stored, and only the duration and confidence of a flagged speech episode are saved.';
 
 // Quiz settings.
 $string['enable_proctoring'] = 'Enable AI proctoring';
@@ -119,7 +119,24 @@ $string['gaze_calibration_helper'] = 'Camera calibration';
 $string['gaze_calibration_helper_help'] = 'Optional: instead of guessing reasonable degree values for the four thresholds above, run this camera-based calibration once (using your own webcam) and it will fill them in for you. It measures how far you need to look to reach the edges of your screen — the same way each student is calibrated at the start of their own attempt — and adds a safety margin on top, since this becomes a ceiling shared by every student taking the quiz, not a personal setting.';
 $string['gaze_run_calibration'] = 'Run camera calibration';
 
+// Voice detection settings.
+$string['enable_voice_detection'] = 'Enable voice detection';
+$string['enable_voice_detection_help'] = 'When enabled, students must allow microphone access during the attempt, and continuous speech longer than the limit below is flagged. Detection runs entirely in the student\'s browser: no audio is recorded, transmitted, or stored, and no voice identification is performed — only the duration of a flagged episode is logged.';
+$string['voice_max_continuous_speech'] = 'Maximum continuous speech (seconds)';
+$string['voice_max_continuous_speech_help'] = 'How long a student may speak without a meaningful pause before a violation is flagged. Brief pauses between words and sentences do not reset the timer, so this measures a genuine stretch of talking. Keep it high enough that a cough or a single short remark can never reach it — the default of 8 seconds catches reading a question or answer aloud while ignoring incidental noise.';
+
+// Voice detection status and reporting.
+$string['status_mic_init'] = 'Initialising microphone...';
+$string['mic_consent_label'] = 'I understand and consent to microphone monitoring for speech detection during this quiz attempt';
+$string['mic_consent_required'] = 'You must agree to microphone monitoring to start this quiz.';
+$string['snapshotstatus_talking_detected'] = 'Talking Detected';
+$string['voicewarning'] = 'Continuous speech detected — please do not talk during the quiz.';
+$string['voiceviolations'] = 'Voice Violations';
+$string['report_voice'] = 'Voice';
+$string['voice_data_log'] = 'Spoke for {$a->duration}s (confidence {$a->confidence})';
+
 // Errors.
 $string['error_no_camera'] = 'Unable to access webcam. Please ensure your camera is connected and you have granted permission.';
+$string['error_no_microphone'] = 'Unable to access the microphone. Please ensure it is connected and you have granted permission.';
 $string['error_model_load'] = 'Failed to load face detection models. Please refresh the page and try again.';
 

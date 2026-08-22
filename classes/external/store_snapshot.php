@@ -51,6 +51,7 @@ class store_snapshot extends external_api {
             'imagedata'  => new external_value(PARAM_RAW, 'Base64 encoded snapshot image', VALUE_DEFAULT, ''),
             'objectsdetected' => new external_value(PARAM_TEXT, 'Comma-separated list of detected prohibited objects', VALUE_DEFAULT, ''),
             'gazedata'   => new external_value(PARAM_TEXT, 'Gaze tracking data: direction,yaw,pitch', VALUE_DEFAULT, ''),
+            'voicedata'  => new external_value(PARAM_TEXT, 'Continuous-speech episode: label,duration_seconds,avg_confidence', VALUE_DEFAULT, ''),
             'timestamp'  => new external_value(PARAM_INT, 'Client-side UNIX timestamp of snapshot (in seconds)', VALUE_DEFAULT, 0),
         ]);
     }
@@ -66,6 +67,7 @@ class store_snapshot extends external_api {
      * @param string $imagedata Base64 encoded image.
      * @param string $objectsdetected Comma-separated list of prohibited objects.
      * @param string $gazedata Gaze tracking data (direction,yaw,pitch).
+     * @param string $voicedata Continuous-speech episode (label,duration,confidence).
      * @param int $timestamp Client-side UNIX timestamp (seconds).
      * @return array Result with success status.
      */
@@ -78,6 +80,7 @@ class store_snapshot extends external_api {
         string $imagedata = '',
         string $objectsdetected = '',
         string $gazedata = '',
+        string $voicedata = '',
         int $timestamp = 0
     ): array {
         global $DB, $USER;
@@ -92,11 +95,12 @@ class store_snapshot extends external_api {
             'imagedata'  => $imagedata,
             'objectsdetected' => $objectsdetected,
             'gazedata'   => $gazedata,
+            'voicedata'  => $voicedata,
             'timestamp'  => $timestamp,
         ]);
 
         // Validate the status value.
-        $validstatuses = ['match', 'mismatch', 'no_face', 'multiple_faces', 'phone_detected', 'looking_away', 'error', 'active'];
+        $validstatuses = ['match', 'mismatch', 'no_face', 'multiple_faces', 'phone_detected', 'looking_away', 'talking_detected', 'error', 'active'];
         if (!in_array($params['status'], $validstatuses)) {
             $params['status'] = 'error';
         }
@@ -128,6 +132,7 @@ class store_snapshot extends external_api {
             'image_data'       => $params['imagedata'],
             'objects_detected' => clean_param(substr($params['objectsdetected'], 0, 255), PARAM_TEXT),
             'gaze_data'        => clean_param(substr($params['gazedata'], 0, 100), PARAM_TEXT),
+            'voice_data'       => clean_param(substr($params['voicedata'], 0, 100), PARAM_TEXT),
             'timecreated'      => $timecreated,
         ];
 

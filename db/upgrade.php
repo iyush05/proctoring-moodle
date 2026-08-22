@@ -148,5 +148,57 @@ function xmldb_quizaccess_proctor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026081602, 'quizaccess', 'proctor');
     }
 
+    if ($oldversion < 2026082200) {
+        // Add continuous-speech (voice) detection: a per-quiz opt-in, its
+        // duration ceiling, and a log field for the flagged episode.
+        $table = new xmldb_table('quizaccess_proctor');
+
+        $field = new xmldb_field(
+            'voice_detection_enabled',
+            XMLDB_TYPE_INTEGER,
+            '2',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '0',
+            'gaze_yaw_right_threshold'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field(
+            'voice_max_continuous_speech',
+            XMLDB_TYPE_INTEGER,
+            '4',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '8',
+            'voice_detection_enabled'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Stores only the episode's duration and confidence — never audio.
+        $table = new xmldb_table('quizaccess_proctor_logs');
+        $field = new xmldb_field(
+            'voice_data',
+            XMLDB_TYPE_CHAR,
+            '100',
+            null,
+            null,
+            null,
+            null,
+            'gaze_data'
+        );
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026082200, 'quizaccess', 'proctor');
+    }
+
     return true;
 }
